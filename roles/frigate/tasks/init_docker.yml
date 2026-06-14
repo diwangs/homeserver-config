@@ -1,0 +1,16 @@
+---
+# Immutable in-tenant provisioning: Docker repo, the Docker engine, and the ipvlan
+# network fabric. Re-runnable; driven by init_tenant.yml.
+- name: Set up Docker apt repository
+  ansible.builtin.include_tasks: init_docker_repo.yml
+
+- name: Download Docker Community Edition
+  ansible.builtin.apt:
+    name: docker-ce
+    state: present
+    update_cache: true
+
+# At this point, you should be able to run `docker run hello-world`
+
+- name: Set up network
+  ansible.builtin.include_tasks: init_setup_network.yml

@@ -1,0 +1,20 @@
+---
+# Codename-aware MongoDB 7 repository. Reused by the dist-upgrade playbook with
+# debian_codename overridden to the target release.
+# MongoDB 8 is only introduced October
+- name: Add MongoDB 7 gpg key
+  ansible.builtin.get_url:
+    url: https://www.mongodb.org/static/pgp/server-7.0.asc
+    dest: /etc/apt/keyrings/mongodb7.asc
+    mode: "0644"
+
+- name: Add MongoDB 7 Debian repository
+  ansible.builtin.deb822_repository:
+    name: mongodb
+    types: [deb]
+    uris: http://repo.mongodb.org/apt/debian
+    suites: ["{{ debian_codename }}/mongodb-org/7.0"]
+    components: [main]
+    signed_by: /etc/apt/keyrings/mongodb7.asc
+    enabled: true
+    state: present

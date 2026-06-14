@@ -1,0 +1,38 @@
+---
+# Immutable provisioning of the Omada LXC. Runs on the Proxmox host; create-once.
+# Mutable resources are owned by config_resources.yml — read here only to size the
+# container at creation time.
+- name: Load Omada container parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml
+    - config.yml
+
+- name: Create Omada LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ omada_vmid }}"
+    hostname: "{{ omada_hostname }}"
+    password: "{{ proxmox_password }}" # Same for now
+    pubkey: "{{ ssh_pubkey }}"
+    ostemplate: "{{ omada_ostemplate }}"
+    disk: "{{ omada_disk }}"
+    cores: "{{ omada_cores }}"
+    memory: "{{ omada_memory }}"
+    swap: "{{ omada_swap }}"
+    netif: "{{ omada_netif }}"
+    features: "{{ omada_features }}"
+    onboot: true
+    state: present
+
+- name: Start Omada LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ omada_vmid }}"
+    state: started

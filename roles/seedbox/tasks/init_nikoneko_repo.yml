@@ -1,0 +1,19 @@
+---
+# Codename-aware nikoneko (openSUSE OBS) qbittorrent repository. openSUSE uses
+# "Debian_NN" paths rather than codenames, derived from debian_release_major.
+# Reused by the dist-upgrade playbook with debian_codename overridden.
+- name: Add `nikoneko` gpg key
+  ansible.builtin.get_url:
+    url: "https://download.opensuse.org/repositories/home:nikoneko:test/Debian_{{ debian_release_major[debian_codename] }}/Release.key"
+    dest: /etc/apt/keyrings/nikoneko.asc
+    mode: "0644"
+
+- name: Add `nikoneko` Debian repository
+  ansible.builtin.deb822_repository:
+    name: nikoneko
+    types: [deb]
+    uris: "http://download.opensuse.org/repositories/home:/nikoneko:/test/Debian_{{ debian_release_major[debian_codename] }}/"
+    suites: ["/"] # flat repo: no components, suite is a bare path
+    signed_by: /etc/apt/keyrings/nikoneko.asc
+    enabled: true
+    state: present

@@ -1,0 +1,12 @@
+# Ansible vault password — NEVER commit
+.vault_pass
+*.vault_pass
+
+# Ansible runtime
+*.retry
+.ansible/
+
+# Editor / OS
+*.swp
+.DS_Store
+.vscode

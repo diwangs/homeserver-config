@@ -1,0 +1,45 @@
+---
+# We mount CIFS shares to the host and then bind mount them to the container
+# This might be less efficient than using LXC mount, but it is more modular
+
+- name: Install cifs-utils
+  ansible.builtin.apt:
+    name: cifs-utils
+    state: present
+    update_cache: true
+
+# External credential because fstab-stored cred is not secure (and causes error code 13 at boot)
+- name: Create Frigate credential file
+  ansible.builtin.copy:
+    dest: /root/frigatesmbcred
+    mode: "0600"
+    content: |
+      username={{ frigate_smb_username }}
+      password={{ frigate_smb_password }}
+
+- name: Mount Frigate SMB share
+  ansible.posix.mount:
+    # NOTE: if the share name is the same as a unix username, `home/<sharename>` will be used instead as path
+    # PROTOCOL: for a share named `<sharename>`, create a user named `<sharename>user`
+    src: //fd5a:715f:1edc:a703::20/frigate
+    path: /mnt/frigate
+    fstype: cifs
+    opts: "_netdev,rw,vers=3.0,mfsymlinks,seal,iocharset=utf8,credentials=/root/frigatesmbcred,file_mode=0660,dir_mode=0770"
+    state: mounted
+
+# - name: Create Nextcloud credential file
+#   ansible.builtin.copy:
+#     dest: /root/nextcloudsmbcred
+#     mode: '0600'
+#     content: |
+#       username={{ dockerdmz_host_nextcloud_smb_username }}
+#       password={{ dockerdmz_host_nextcloud_smb_password }}
+
+# # NOTE: manually uploading files to the share requires occ rescan before it appears on Nextcloud
+# - name: Mount Nextcloud Datadir SMB share
+#   ansible.posix.mount:
+#     src: //fd5a:715f:1edc:a703::20/nextcloud
+#     path: /mnt/nextcloud
+#     fstype: cifs
+#     opts: "_netdev,rw,vers=3.0,mfsymlinks,seal,iocharset=utf8,credentials=/root/nextcloudsmbcred,uid=33,gid=0,file_mode=0660,dir_mode=0770"
+#     state: mounted

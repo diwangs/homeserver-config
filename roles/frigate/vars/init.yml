@@ -1,0 +1,15 @@
+---
+# Immutable creation parameters for the Frigate/Docker LXC (vmid 102). Applied once
+# by roles/frigate/tasks/init_lxc.yml; never reconciled afterwards.
+frigate_vmid: 102
+frigate_hostname: docker
+# TODO: make sure the template exist first?
+# Not compatible with update
+frigate_ostemplate: local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst
+frigate_disk: local-lvm:16 # 16 GB
+frigate_netif:
+  # backend
+  net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip6=dhcp"
+frigate_unprivileged: false # Required for passing GPU
+frigate_features:
+  - nesting=1 # Required to run docker

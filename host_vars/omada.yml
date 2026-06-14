@@ -1,0 +1,7 @@
+---
+omada_url: https://static.tp-link.com/upload/software/2026/202601/20260121/Omada_Network_Application_v6.1.0.19_linux_x64_20260117100106.deb
+
+# Third-party repo task re-laid (with the target codename) by the dist-upgrade
+# playbook — see tasks/debian_dist_upgrade.yml.
+tenant_repo_role: omada
+tenant_repo_tasks: init_mongodb_repo.yml

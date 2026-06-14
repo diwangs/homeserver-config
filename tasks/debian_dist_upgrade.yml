@@ -1,0 +1,110 @@
+---
+# Reusable in-place Debian major dist-upgrade for an LXC tenant (e.g. bookworm ->
+# trixie). Expects `target_codename` to be set by the calling play. Third-party
+# repos are re-laid for the new codename by reusing the tenant's codename-aware
+# repo task (tenant_repo_role / tenant_repo_tasks host_vars).
+- name: Fail fast unless the tenant is on the expected source release
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Debian"
+      - ansible_distribution_release != target_codename
+    fail_msg: >-
+      Expected a Debian tenant not already on {{ target_codename }};
+      found {{ ansible_distribution }} {{ ansible_distribution_release }}.
+    success_msg: "Upgrading {{ inventory_hostname }} from {{ ansible_distribution_release }} to {{ target_codename }}."
+
+- name: Record the source release for later cleanup
+  ansible.builtin.set_fact:
+    source_codename: "{{ ansible_distribution_release }}"
+
+# --- Step 1: get fully current on the source release first (Debian's two-step) -
+- name: Update apt cache and apply pending upgrades on the source release
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: "yes" # `apt upgrade`: no new/removed packages
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Autoremove leftovers before switching release
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+
+# --- Step 2: switch the base OS sources to the target codename ----------------
+- name: Find base apt source files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/apt/sources.list
+    - /etc/apt/sources.list.d/debian.sources
+  register: base_sources
+
+- name: Point base apt sources at the target codename
+  ansible.builtin.replace:
+    path: "{{ item.item }}"
+    regexp: "{{ source_codename }}"
+    replace: "{{ target_codename }}"
+  loop: "{{ base_sources.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+# --- Step 3: drop stale third-party classic .list repos (old codename) --------
+# After the refactor every third-party repo is deb822 (.sources). Any *.list in
+# sources.list.d still referencing the old codename is a stale apt_repository
+# leftover that would break apt on the new release.
+- name: Find stale third-party .list repos pinned to the old release
+  ansible.builtin.find:
+    paths: /etc/apt/sources.list.d
+    patterns: "*.list"
+    contains: "{{ source_codename }}|Debian_{{ debian_release_major[source_codename] }}"
+    read_whole_file: true
+  register: stale_repos
+
+- name: Remove stale third-party .list repos
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ stale_repos.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# --- Step 4: re-lay this tenant's third-party repos for the new codename -------
+- name: Re-lay tenant third-party repos for the target codename
+  ansible.builtin.include_role:
+    name: "{{ tenant_repo_role }}"
+    tasks_from: "{{ tenant_repo_tasks }}"
+  vars:
+    debian_codename: "{{ target_codename }}"
+  when: tenant_repo_role is defined
+
+# --- Step 5: the actual dist-upgrade ------------------------------------------
+- name: Full dist-upgrade to the target codename
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: full # `apt full-upgrade`: may add/remove packages
+    dpkg_options: force-confdef,force-confold # keep existing configs unattended
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Purge packages left behind by the upgrade
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+
+# --- Step 6: reboot onto the new userland and verify --------------------------
+# In-container reboot over SSH. If a tenant misbehaves, reboot from the Proxmox
+# host instead: `pct reboot <CTID>` delegated to {{ proxmox_host }}.
+- name: Reboot the container
+  ansible.builtin.reboot:
+    post_reboot_delay: 15
+
+- name: Re-gather facts after reboot
+  ansible.builtin.setup:
+
+- name: Confirm the tenant is now on the target codename
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution_release == target_codename
+    fail_msg: "Upgrade did not complete: still on {{ ansible_distribution_release }}."
+    success_msg: "{{ inventory_hostname }} is now on Debian {{ ansible_distribution_release }}."

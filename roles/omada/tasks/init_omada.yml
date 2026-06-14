@@ -1,0 +1,18 @@
+---
+# Immutable in-tenant provisioning: lay down the MongoDB repo and install the base
+# runtime Omada depends on. Re-runnable; driven by init_tenant.yml.
+- name: Set up MongoDB apt repository
+  ansible.builtin.include_tasks: init_mongodb_repo.yml
+
+# Update repository
+# - import_tasks: update_apt.yml
+
+- name: Download prerequisites
+  ansible.builtin.apt:
+    name:
+      - mongodb-org
+      - openjdk-17-jre # The guide needs Java 8, but Debian 12 only has Java 17
+      - jsvc
+      - curl
+    state: present
+    update_cache: true

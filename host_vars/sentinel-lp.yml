@@ -1,0 +1,26 @@
+---
+# Connection password — actual value lives in the encrypted group_vars/all/vault.yml
+ansible_password: "{{ vault_proxmox_password }}"
+
+hdparm_devices:
+  - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_D7JEUUGN
+    options:
+      - "apm = 127"
+      - "spindown_time = 240" # 20 mins
+  - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_5QK4975B
+    options:
+      - "apm = 127"
+      - "spindown_time = 240"
+  - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_D7J6PRPN
+    options:
+      - "apm = 127"
+      - "spindown_time = 240"
+
+# After usbip is installed, run `usbip list -l` to get the busid
+# Serial: Silicon Labs: CP210x UART bridge (careful, it's the same as skyconnect)
+digirig_serial_busid: 1-3.2.1
+# Soundcard: C-Media Electronics
+digirig_soundcard_busid: 1-3.2.2
+
+haos_url: https://github.com/home-assistant/operating-system/releases/download/14.2/haos_ova-14.2.qcow2.xz
+skyconnect_busid: 1-1

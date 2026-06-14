@@ -1,0 +1,9 @@
+[baremetal]
+sentinel-lp ansible_host=fd5a:715f:1edc:a703::10 ansible_connection=ssh ansible_user=root
+
+[lxc]
+nas ansible_host=fd5a:715f:1edc:a703::20 ansible_connection=ssh ansible_user=root
+omada ansible_host=fd5a:715f:1edc:a703::21 ansible_connection=ssh ansible_user=root
+docker ansible_host=fd5a:715f:1edc:a703::22 ansible_connection=ssh ansible_user=root
+nextcloud ansible_host=fd5a:715f:1edc:a706::23 ansible_connection=ssh ansible_user=root
+seedbox ansible_host=fd5a:715f:1edc:a703::25 ansible_connection=ssh ansible_user=root

@@ -1,0 +1,48 @@
+---
+# Immutable provisioning of the Frigate/Docker LXC. Runs on the Proxmox host;
+# create-once. Mutable resources are owned by config_resources.yml — read here only
+# to size the container at creation time.
+- name: Load Docker container parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml
+    - config.yml
+
+- name: Create Docker LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ frigate_vmid }}"
+    hostname: "{{ frigate_hostname }}"
+    password: "{{ proxmox_password }}" # Same for now
+    pubkey: "{{ ssh_pubkey }}"
+    ostemplate: "{{ frigate_ostemplate }}"
+    disk: "{{ frigate_disk }}"
+    cores: "{{ frigate_cores }}"
+    memory: "{{ frigate_memory }}"
+    swap: "{{ frigate_swap }}"
+    netif: "{{ frigate_netif }}"
+    unprivileged: "{{ frigate_unprivileged }}"
+    features: "{{ frigate_features }}"
+    onboot: true
+    state: present
+
+- name: Attach iGPU for hardware codec (temporary solution)
+  ansible.builtin.blockinfile:
+    path: /etc/pve/lxc/102.conf
+    prepend_newline: true
+    append_newline: true
+    block: |
+      lxc.cgroup2.devices.allow: c 226:128 rwm
+      lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file
+
+- name: Start Docker LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ frigate_vmid }}"
+    state: started

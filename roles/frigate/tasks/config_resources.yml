@@ -1,0 +1,23 @@
+---
+# Reconcile mutable LXC resources onto the live Frigate/Docker container. Runs on
+# the Proxmox host (configure.yml); `update: true` updates an existing container.
+- name: Load Docker resource parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml # for frigate_vmid
+    - config.yml
+
+- name: Reconcile Docker LXC resources
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ frigate_vmid }}"
+    # hostname is immutable, but the proxmox module requires it whenever
+    # state=present (the default) — pass it through unchanged.
+    hostname: "{{ frigate_hostname }}"
+    cores: "{{ frigate_cores }}"
+    memory: "{{ frigate_memory }}"
+    swap: "{{ frigate_swap }}"
+    update: true

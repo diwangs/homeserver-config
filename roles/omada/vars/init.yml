@@ -1,0 +1,16 @@
+---
+# Immutable creation parameters for the Omada LXC (vmid 101). Applied once by
+# roles/omada/tasks/init_lxc.yml; never reconciled afterwards.
+omada_vmid: 101
+omada_hostname: omada
+# TODO: make sure the template exist first?
+omada_ostemplate: local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst
+omada_disk: local-lvm:8 # 8 GB
+omada_netif:
+  # net0: backend, DHCPv6
+  net0: "name=eth0,bridge=vmbr1,tag=3,firewall=1,ip6=dhcp"
+  # net1: infra, DHCPv4 (for connecting with child switches)
+  # This doesn't need gateway because we only need to connect to link-local devices
+  net1: "name=eth1,bridge=vmbr1,tag=1,firewall=1,ip=dhcp"
+omada_features:
+  - nesting=1 # Newer Systemd requires namespacing

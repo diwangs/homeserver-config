@@ -1,0 +1,48 @@
+---
+# Accept RA on the physical interface interface
+# https://github.com/docker/for-linux/issues/844
+# Then wait some time for RA to arrive
+
+- name: Fix Router Advertisement bug
+  ansible.posix.sysctl:
+    name: "net.ipv6.conf.eth3.accept_ra"
+    value: 2
+    state: present
+
+# We use ipvlan for the Docker network, which offers these advantages:
+# 1. Unlike bridge, it doesn't do address translation, which is not necessary
+#   for IPv6. Because it doesn't do address translation, each container is able
+#   to own an IP address and is routable.
+# 2. As a result, it's not necessary to do port mapping too.
+# 3. (Nit) Less pressure on the switch compared to macvlan.
+#
+# While technically supports VLAN, it seems to have problem with nested VLAN
+# of LXC?
+#
+# The only disadvantage is that it doesn't integrate with the router's DHCPv6
+# and RA in general, which means it doesn't support dynamic prefix for globally
+# routable address. Miraculously, even if each container doesn't have a
+# globally routable address they can still communicate with the outside world,
+# as long as the parent interface has a globally routable address (e.g., eth0)
+# ADDED: globally routable only if SLAAC is enabled
+
+# To create another VLAN, create new interface first
+
+- name: Create Docker ipvlan network for backend VLAN
+  community.docker.docker_network:
+    name: backend
+    enable_ipv6: true
+    driver: ipvlan
+    driver_options:
+      parent: eth3
+    ipam_config:
+      - subnet: fd5a:715f:1edc:a703::/64
+        gateway: fd5a:715f:1edc:a703::1
+        iprange: fd5a:715f:1edc:a703::30/124 # 30 - 39
+
+# Note on bridges:
+#
+# Some setup (e.g., Nextcloud AIO) assumes bridge network, which rely on the
+# host address. This could be problematic if we only want to publicly expose
+# some services. Our current solution is just to use the backend network and
+# adjust firewall manually.

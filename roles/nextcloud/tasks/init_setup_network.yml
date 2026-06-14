@@ -1,0 +1,57 @@
+---
+# Note: eth6's RA/SLAAC/DHCPv6 is owned by systemd-networkd, configured and
+# enabled at the LXC layer (see nextcloud/tasks/lxc.yml). networkd processes RAs in
+# userspace and installs the default route itself, so it handles this Docker/
+# forwarding host without a kernel `accept_ra=2` workaround (the kernel ignores
+# RAs while forwarding — github.com/docker/for-linux/issues/844).
+
+# We use ipvlan for the Docker network, which offers these advantages:
+# 1. Unlike bridge, it doesn't do address translation, which is not necessary
+#   for IPv6. Because it doesn't do address translation, each container is able
+#   to own an IP address and is routable.
+# 2. As a result, it's not necessary to do port mapping too.
+# 3. (Nit) Less pressure on the switch compared to macvlan.
+#
+# While technically supports VLAN, it seems to have problem with nested VLAN
+# of LXC?
+#
+# The only disadvantage is that it doesn't integrate with the router's DHCPv6
+# and RA in general, which means it doesn't support dynamic prefix for globally
+# routable address. Miraculously, even if each container doesn't have a
+# globally routable address they can still communicate with the outside world,
+# as long as the parent interface has a globally routable address (e.g., eth0)
+# ADDED: globally routable only if SLAAC is enabled
+
+# In order for nextcloud-aio to enable IPv6 routing...
+- name: Enable IPv6 in default bridge network
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "default-network-opts": {"bridge":{"com.docker.network.enable_ipv6":"true"}}
+      }
+
+- name: Restart Docker after config change
+  ansible.builtin.service:
+    name: docker
+    state: restarted
+
+- name: Create Docker ipvlan network for dmz VLAN
+  community.docker.docker_network:
+    name: dmz
+    enable_ipv6: true
+    driver: ipvlan
+    driver_options:
+      parent: eth6
+    ipam_config:
+      - subnet: fd5a:715f:1edc:a706::/64
+        gateway: fd5a:715f:1edc:a706::1
+        iprange: fd5a:715f:1edc:a706::30/124 # 30 - 39
+
+# Note on bridges:
+#
+# Some setup (e.g., Nextcloud AIO) assumes bridge network, which rely on the
+# host address. This could be problematic if we only want to publicly expose
+# some services. Our current solution is just to use the backend network and
+# adjust firewall manually.

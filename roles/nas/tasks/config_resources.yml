@@ -1,0 +1,24 @@
+---
+# Reconcile mutable LXC resources onto the live NAS container. Runs on the Proxmox
+# host (configure.yml). `update: true` pushes cores/memory/swap changes into an
+# existing container without recreating it.
+- name: Load NAS resource parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml # for nas_vmid
+    - config.yml
+
+- name: Reconcile NAS LXC resources
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nas_vmid }}"
+    # hostname is immutable, but the proxmox module requires it whenever
+    # state=present (the default) — pass it through unchanged.
+    hostname: "{{ nas_hostname }}"
+    cores: "{{ nas_cores }}"
+    memory: "{{ nas_memory }}"
+    swap: "{{ nas_swap }}"
+    update: true

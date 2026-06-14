@@ -1,0 +1,6 @@
+---
+# Mutable in-tenant config: install (and version-bump) the Omada application from
+# omada_url. Re-runnable; driven by configure.yml.
+- name: Install Omada
+  ansible.builtin.apt:
+    deb: "{{ omada_url }}"

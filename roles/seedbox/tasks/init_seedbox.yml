@@ -1,0 +1,11 @@
+---
+# Immutable in-tenant provisioning: lay down the nikoneko repo and install the
+# qbittorrent runtime. Re-runnable; driven by init_tenant.yml.
+- name: Set up nikoneko apt repository
+  ansible.builtin.include_tasks: init_nikoneko_repo.yml
+
+- name: Install qbittorrent-nox (no X, web only)
+  ansible.builtin.apt:
+    name: qbittorrent-nox
+    state: present
+    update_cache: true

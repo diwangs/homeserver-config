@@ -1,0 +1,7 @@
+---
+# 45drives has a repository but is only for Ubuntu Focal (20.04)
+# Thus, we will install them manually instead
+
+cockpit_file_sharing_url: https://github.com/45Drives/cockpit-file-sharing/releases/download/v4.2.8/cockpit-file-sharing_4.2.8-1focal_all.deb
+cockpit_identities_url: https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb
+cockpit_navigator_url: https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb

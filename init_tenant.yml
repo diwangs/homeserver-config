@@ -1,0 +1,46 @@
+---
+# Provisioning, stage 2 of 2 — runs inside each tenant over SSH. Lays down the
+# immutable in-guest platform: third-party apt repos, base runtimes (Docker engine,
+# MongoDB, qbittorrent) and the Docker ipvlan network fabric.
+#
+# WARNING: run this only after init_proxmox.yml has created the guests AND a static
+# DHCPv6 lease has been set up manually for each tenant (check with
+# `ansible <host> -m ping`). The lease step can't be automated: the DUID can't be
+# set statically from outside, so the router can't recognise a guest to assign it a
+# deterministic IP beforehand. (Static IP lets us SSH but breaks internet egress
+# under a rotating prefix; DHCPv4 would need an insecure nat64 to the backend
+# subnet. See git history for the full rationale.)
+#
+# nas and hass have no in-tenant provisioning step.
+
+- name: Provision Omada tenant
+  hosts: omada
+  tasks:
+    - name: Provision Omada platform
+      ansible.builtin.import_role:
+        name: omada
+        tasks_from: init_omada.yml
+
+- name: Provision Frigate tenant
+  hosts: docker
+  tasks:
+    - name: Provision Docker platform
+      ansible.builtin.import_role:
+        name: frigate
+        tasks_from: init_docker.yml
+
+- name: Provision Nextcloud tenant
+  hosts: nextcloud
+  tasks:
+    - name: Provision Docker platform
+      ansible.builtin.import_role:
+        name: nextcloud
+        tasks_from: init_docker.yml
+
+- name: Provision seedbox tenant
+  hosts: seedbox
+  tasks:
+    - name: Provision seedbox platform
+      ansible.builtin.import_role:
+        name: seedbox
+        tasks_from: init_seedbox.yml

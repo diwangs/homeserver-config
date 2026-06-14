@@ -1,0 +1,5 @@
+---
+# Third-party repo task re-laid (with the target codename) by the dist-upgrade
+# playbook — see tasks/debian_dist_upgrade.yml.
+tenant_repo_role: seedbox
+tenant_repo_tasks: init_nikoneko_repo.yml

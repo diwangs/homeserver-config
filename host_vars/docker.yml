@@ -1,0 +1,5 @@
+---
+# Third-party repo task re-laid (with the target codename) by the dist-upgrade
+# playbook — see tasks/debian_dist_upgrade.yml.
+tenant_repo_role: frigate
+tenant_repo_tasks: init_docker_repo.yml

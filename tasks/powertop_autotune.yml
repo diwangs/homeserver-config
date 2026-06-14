@@ -1,0 +1,11 @@
+---
+- name: Install powertop
+  ansible.builtin.package:
+    name: powertop
+    state: present
+
+- name: Run powertop autotune
+  ansible.builtin.command:
+    cmd: powertop --auto-tune
+  failed_when: false
+  changed_when: false

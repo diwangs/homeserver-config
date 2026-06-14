@@ -1,0 +1,17 @@
+---
+proxmox_host: sentinel-lp
+proxmox_user: root@pam
+ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIz6uuEDziEcwZFjwNr9+d7st1eRQJ0FtYBlgdk4bPhG openpgp:0x5D25EFFE"
+subnet: fd5a:715f:1edc:a703::1/64
+
+# Debian release that third-party APT repos are pinned to. Defaults to the
+# release currently running on the tenant, so fresh provisioning is correct on
+# any base. The dist-upgrade playbook overrides this with the target codename so
+# repo tasks lay down the new suite while base packages still report the old one.
+debian_codename: "{{ ansible_distribution_release }}"
+debian_release_major: # for openSUSE-style "Debian_NN" repo paths
+  bookworm: "12"
+  trixie: "13"
+
+# Secret indirection — actual value lives in the encrypted vault.yml
+proxmox_password: "{{ vault_proxmox_password }}"

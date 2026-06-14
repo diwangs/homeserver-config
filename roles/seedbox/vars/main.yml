@@ -1,0 +1,3 @@
+---
+seedbox_torrent_smb_username: torrentuser
+seedbox_torrent_smb_password: "{{ vault_torrent_smb_password }}"

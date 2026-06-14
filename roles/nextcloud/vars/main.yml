@@ -1,0 +1,3 @@
+---
+# Nextcloud data is now served from a shared host mountpoint (/mnt/lvm-nextcloud)
+# instead of an SMB share, so the former SMB credential vars are no longer needed.

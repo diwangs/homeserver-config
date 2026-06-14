@@ -1,0 +1,63 @@
+---
+# Immutable provisioning of the NAS LXC. Runs on the Proxmox host; create-once.
+# Mutable resources (cores/memory/swap) are owned by config_resources.yml — read
+# here only to size the container at creation time.
+- name: Load NAS container parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml
+    - config.yml
+
+- name: Create NAS LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nas_vmid }}"
+    hostname: "{{ nas_hostname }}"
+    password: "{{ proxmox_password }}" # Same for now
+    pubkey: "{{ ssh_pubkey }}"
+    ostemplate: "{{ nas_ostemplate }}"
+    disk: "{{ nas_disk }}"
+    cores: "{{ nas_cores }}"
+    memory: "{{ nas_memory }}"
+    swap: "{{ nas_swap }}"
+    netif: "{{ nas_netif }}"
+    # BUG: https://github.com/ansible-collections/community.general/issues/8982
+    # mount_volumes:
+    #   - id: mp0
+    #     mountpoint: '/mnt/frontpanel-dataset'
+    #     host_path: '/frontpanel-pool/frontpanel-dataset'
+    features: "{{ nas_features }}"
+    onboot: true
+    startup: "{{ nas_startup }}"
+    state: present
+
+- name: Temporary fix for frontpanel-dataset
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/100.conf
+    line: "mp0: /frontpanel-pool/frontpanel-dataset,mp=/mnt/frontpanel-dataset"
+    regexp: "^mp0: /frontpanel-pool/frontpanel-dataset,mp=/mnt/frontpanel-dataset"
+    state: present
+
+# Shared Nextcloud directory, also bind-mounted into dockerdmz. nas accesses it as
+# `diwangs` (uid 1000) via its existing 1000->1000 idmap, so no idmap change needed.
+- name: Bind mount shared Nextcloud directory into nas
+  ansible.builtin.blockinfile:
+    path: /etc/pve/lxc/100.conf
+    marker: "# {mark} ANSIBLE nextcloud-mp"
+    block: |
+      mp1: /home/diwangs/nextcloud,mp=/home/diwangs/nextcloud
+
+- name: Pass through ZFS user
+  ansible.builtin.include_tasks: init_passthrough_zfs_user.yml
+
+- name: Start NAS LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nas_vmid }}"
+    state: started

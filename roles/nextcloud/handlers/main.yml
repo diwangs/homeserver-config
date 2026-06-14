@@ -1,0 +1,7 @@
+---
+# Runs only when a task notifies it (i.e. when eth6.network actually changed).
+# Triggered from tasks/lxc.yml via `notify: Reload networkd in dmz container`.
+- name: Reload networkd in dmz container
+  ansible.builtin.command:
+    cmd: pct exec 103 -- networkctl reload
+  changed_when: true

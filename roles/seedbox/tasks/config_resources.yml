@@ -1,0 +1,23 @@
+---
+# Reconcile mutable LXC resources onto the live seedbox container. Runs on the
+# Proxmox host (configure.yml); `update: true` updates an existing container.
+- name: Load seedbox resource parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml # for seedbox_vmid
+    - config.yml
+
+- name: Reconcile seedbox LXC resources
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ seedbox_vmid }}"
+    # hostname is immutable, but the proxmox module requires it whenever
+    # state=present (the default) — pass it through unchanged.
+    hostname: "{{ seedbox_hostname }}"
+    cores: "{{ seedbox_cores }}"
+    memory: "{{ seedbox_memory }}"
+    swap: "{{ seedbox_swap }}"
+    update: true

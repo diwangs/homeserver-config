@@ -1,0 +1,20 @@
+---
+# Reconcile mutable resources onto the live Home Assistant VM. Runs on the Proxmox
+# host (configure.yml); `update: true` updates an existing VM (proxmox_kvm, not
+# proxmox — hass is KVM, not LXC, and has no swap).
+- name: Load Home Assistant resource parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml # for hass_vmid
+    - config.yml
+
+- name: Reconcile Home Assistant VM resources
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ hass_vmid }}"
+    cores: "{{ hass_cores }}"
+    memory: "{{ hass_memory }}"
+    update: true

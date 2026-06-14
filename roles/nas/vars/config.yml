@@ -1,0 +1,6 @@
+---
+# Mutable resources. Read at creation (init_lxc.yml) and reconciled onto the live
+# container by roles/nas/tasks/config_resources.yml (proxmox update: true).
+nas_cores: 1
+nas_memory: 128 # 128 MB
+nas_swap: 512

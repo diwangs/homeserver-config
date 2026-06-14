@@ -1,0 +1,26 @@
+---
+- name: Create Frigate container
+  community.docker.docker_container:
+    name: frigate
+    image: ghcr.io/blakeblackshear/frigate:0.17.1
+    restart_policy: always
+    shm_size: 82M # Recommended?
+    state: started
+    networks:
+      - name: host # Because frigate doesn't expose IPv6, we need to proxy them
+    volumes:
+      - frigate_data:/data # For frigate.db to let disk spindown
+      - /mnt/frigate/config:/config
+      - /mnt/frigate/recordings:/media/frigate/recordings
+      - /mnt/frigate/clips:/media/frigate/clips
+      - /mnt/frigate/exports:/media/frigate/exports
+    mounts:
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs_size: 1G
+    devices:
+      - "/dev/dri/renderD128:/dev/dri/renderD128:rwm"
+    capabilities:
+      - PERFMON
+
+# NOTE: In order to integrate with hass, change the admin password first

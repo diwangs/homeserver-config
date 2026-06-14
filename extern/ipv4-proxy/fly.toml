@@ -1,0 +1,17 @@
+app = "ipv4-proxy"
+primary_region = "your-region"   # set by `fly launch`; change to your nearest region
+
+[build]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 443
+  auto_stop_machines = false   # proxy must stay up; no cold-start dropping connections
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443          # no handlers = raw passthrough, TLS NOT terminated
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"      # plenty for an nginx stream proxy

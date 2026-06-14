@@ -1,0 +1,98 @@
+---
+# Immutable provisioning of the Nextcloud/DMZ LXC. Runs on the Proxmox host;
+# create-once. Mutable resources are owned by config_resources.yml — read here only
+# to size the container at creation time.
+- name: Load Nextcloud container parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml
+    - config.yml
+
+- name: Create Docker DMZ LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nextcloud_vmid }}"
+    hostname: "{{ nextcloud_hostname }}"
+    password: "{{ proxmox_password }}" # Same for now
+    pubkey: "{{ ssh_pubkey }}"
+    ostemplate: "{{ nextcloud_ostemplate }}"
+    disk: "{{ nextcloud_disk }}"
+    cores: "{{ nextcloud_cores }}"
+    memory: "{{ nextcloud_memory }}"
+    swap: "{{ nextcloud_swap }}"
+    netif: "{{ nextcloud_netif }}"
+    unprivileged: "{{ nextcloud_unprivileged }}"
+    features: "{{ nextcloud_features }}"
+    onboot: true
+    state: present
+
+# Shared host directory for Nextcloud data, also bind-mounted into the nas container.
+# Owned by `diwangs` (uid 1000) on the host; appears as www-data (uid 33) inside
+# dockerdmz via the idmap below.
+- name: Ensure shared Nextcloud directory exists on host
+  ansible.builtin.file:
+    path: /home/diwangs/nextcloud
+    state: directory
+    owner: diwangs
+    group: diwangs
+    mode: "0770"
+
+- name: Bind mount shared Nextcloud directory into nextcloud
+  ansible.builtin.blockinfile:
+    path: /etc/pve/lxc/103.conf
+    marker: "# {mark} ANSIBLE nextcloud-mp"
+    block: |
+      mp0: /home/diwangs/nextcloud,mp=/mnt/lvm-nextcloud
+
+- name: Pass through Nextcloud (www-data) user
+  ansible.builtin.include_tasks: init_passthrough_nextcloud_user.yml
+
+- name: Start Docker LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nextcloud_vmid }}"
+    state: started
+
+# Configure eth6's addressing from the host side (via pct exec), before anything
+# relies on the container's management address. This can't go in the SSH-based
+# docker layer (nextcloud/tasks/init_docker.yml): that targets ::23, which doesn't
+# exist until DHCPv6 has run — a bootstrap catch-22.
+#
+# We use systemd-networkd as the in-container manager. Unlike dhcpcd, it drives
+# links over rtnetlink — no udev, no .device units — so its built-in DHCPv6 client
+# works in this unprivileged LXC, where both dhcpcd modes failed (master mode:
+# "no valid interfaces found"; the @template: BindsTo a .device unit that never
+# activates without udev). networkd also ships with systemd, so there's nothing to
+# install (no apt, no stale-index 404, no SLAAC bootstrap needed). It processes the
+# RA in userspace and installs the default route itself, which also covers this
+# Docker/forwarding host (the kernel ignores RAs while forwarding —
+# github.com/docker/for-linux/issues/844). Proxmox never touches
+# /etc/systemd/network, so this file is safe from the interfaces-file regeneration.
+- name: Deploy systemd-networkd config for eth6 in dmz container
+  ansible.builtin.command:
+    cmd: >
+      pct exec 103 -- sh -c
+      'n="[Match]\nName=eth6\n\n[Network]\nDHCP=ipv6\nIPv6AcceptRA=yes\n";
+      printf "$n" | cmp -s - /etc/systemd/network/eth6.network ||
+      { printf "$n" > /etc/systemd/network/eth6.network; echo changed; }'
+  register: nextcloud_dmz_eth6_network
+  changed_when: "'changed' in nextcloud_dmz_eth6_network.stdout"
+  notify: Reload networkd in dmz container
+
+- name: Enable and start systemd-networkd in dmz container
+  ansible.builtin.command:
+    cmd: pct exec 103 -- systemctl enable --now systemd-networkd.socket systemd-networkd.service
+  register: nextcloud_dmz_networkd_enable
+  changed_when: "'Created symlink' in nextcloud_dmz_networkd_enable.stderr"
+
+# Handlers normally run at the very end of the play, but this play goes on to
+# build the seedbox/hass guests afterwards. Flush here so the networkd reload
+# happens right after networkd is enabled, exactly as the old inline task did.
+- name: Apply pending dmz network changes
+  ansible.builtin.meta: flush_handlers

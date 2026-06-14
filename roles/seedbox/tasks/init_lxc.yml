@@ -1,0 +1,39 @@
+---
+# Immutable provisioning of the seedbox LXC. Runs on the Proxmox host; create-once.
+# Mutable resources are owned by config_resources.yml — read here only to size the
+# container at creation time.
+- name: Load seedbox container parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml
+    - config.yml
+
+- name: Create torrentbox LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ seedbox_vmid }}"
+    hostname: "{{ seedbox_hostname }}"
+    password: "{{ proxmox_password }}" # Same for now
+    pubkey: "{{ ssh_pubkey }}"
+    ostemplate: "{{ seedbox_ostemplate }}"
+    disk: "{{ seedbox_disk }}"
+    cores: "{{ seedbox_cores }}"
+    memory: "{{ seedbox_memory }}"
+    swap: "{{ seedbox_swap }}"
+    netif: "{{ seedbox_netif }}"
+    unprivileged: "{{ seedbox_unprivileged }}"
+    features: "{{ seedbox_features }}"
+    onboot: true
+    state: present
+
+- name: Start torrentbox LXC Container
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ seedbox_vmid }}"
+    state: started

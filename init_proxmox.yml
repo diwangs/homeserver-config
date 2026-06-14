@@ -1,0 +1,51 @@
+---
+# Provisioning, stage 1 of 2 — runs on the Proxmox host. Creates the
+# containers/VM and lays down their immutable per-guest platform that lives on the
+# host side (resources at creation, UID passthrough, bind mounts, bootstrap
+# networking). No tenant SSH happens here, so it works on a cold host.
+#
+# Cold-start flow:
+#   1. run init_proxmox.yml  — creates the guests,
+#   2. set the static DHCPv6 leases for the new guests
+#      (check with `ansible <host> -m ping`),
+#   3. run init_tenant.yml   — provisions inside each guest over SSH.
+# Both init playbooks are idempotent, so re-running either is safe.
+#
+# After both, run configure.yml for the mutable resource + application layer.
+
+- name: Create guests on the Proxmox host
+  hosts: sentinel-lp
+  roles:
+    - role: geerlingguy.hdparm
+  tasks:
+    - name: Set up ZFS
+      ansible.builtin.import_tasks: roles/zfs.yml
+    - name: Download LXC templates
+      ansible.builtin.import_tasks: roles/templates.yml
+    - name: Create NAS container
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: init_lxc.yml
+    - name: Create Omada container
+      ansible.builtin.import_role:
+        name: omada
+        tasks_from: init_lxc.yml
+    - name: Create Frigate container
+      ansible.builtin.import_role:
+        name: frigate
+        tasks_from: init_lxc.yml
+    - name: Create Nextcloud container
+      ansible.builtin.import_role:
+        name: nextcloud
+        tasks_from: init_lxc.yml
+    - name: Create seedbox container
+      ansible.builtin.import_role:
+        name: seedbox
+        tasks_from: init_lxc.yml
+    - name: Set up Home Assistant VM
+      ansible.builtin.import_role:
+        name: hass
+        tasks_from: init_kvm.yml
+    # - name: Set up usbip
+    #   ansible.builtin.import_tasks: roles/usbip.yml
+    # - role: coral_host
