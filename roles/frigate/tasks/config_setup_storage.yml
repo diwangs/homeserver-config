@@ -26,20 +26,3 @@
     fstype: cifs
     opts: "_netdev,rw,vers=3.0,mfsymlinks,seal,iocharset=utf8,credentials=/root/frigatesmbcred,file_mode=0660,dir_mode=0770"
     state: mounted
-
-# - name: Create Nextcloud credential file
-#   ansible.builtin.copy:
-#     dest: /root/nextcloudsmbcred
-#     mode: '0600'
-#     content: |
-#       username={{ dockerdmz_host_nextcloud_smb_username }}
-#       password={{ dockerdmz_host_nextcloud_smb_password }}
-
-# # NOTE: manually uploading files to the share requires occ rescan before it appears on Nextcloud
-# - name: Mount Nextcloud Datadir SMB share
-#   ansible.posix.mount:
-#     src: //fd5a:715f:1edc:a703::20/nextcloud
-#     path: /mnt/nextcloud
-#     fstype: cifs
-#     opts: "_netdev,rw,vers=3.0,mfsymlinks,seal,iocharset=utf8,credentials=/root/nextcloudsmbcred,uid=33,gid=0,file_mode=0660,dir_mode=0770"
-#     state: mounted

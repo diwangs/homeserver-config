@@ -50,7 +50,7 @@
         tasks_from: config_omada.yml
 
 - name: Configure Frigate tenant
-  hosts: docker
+  hosts: frigate
   tasks:
     - name: Configure Frigate docker stack
       ansible.builtin.import_role:

@@ -1,0 +1,29 @@
+---
+# Bounce the LXC to apply a netif change (new/changed NIC). Notified from
+# config_resources.yml's netif reconcile. Only fires on a real change, so it's a
+# handler rather than a `when: is changed` task. Defined before the networkd reload
+# so a netif-driven restart (which re-applies networkd on boot) runs first.
+- name: Restart Docker LXC
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ frigate_vmid }}"
+    state: restarted
+
+# Re-apply systemd-networkd addressing after an eth*.network file changes without a
+# full restart. Notified from setup_networkd.yml.
+- name: Reload networkd in Docker LXC
+  ansible.builtin.command:
+    cmd: pct exec {{ frigate_vmid }} -- networkctl reload
+  changed_when: true
+
+# Apply a Caddyfile change. Notified from config_caddy.yml and flushed there (before
+# the Frigate container is created) so Caddy re-binds off 0.0.0.0:5000 onto the ULA,
+# freeing 127.0.0.1:5000 for Frigate's published port. A full restart (not reload)
+# guarantees the old all-interfaces listener is torn down first.
+- name: Restart caddy
+  ansible.builtin.service:
+    name: caddy
+    state: restarted

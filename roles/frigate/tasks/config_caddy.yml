@@ -4,9 +4,18 @@
     dest: /etc/caddy/Caddyfile
     mode: "0644"
     content: |
-      :5050 {
-        reverse_proxy :5000
+      # IPv6 -> IPv4 front for Frigate's unauthenticated web UI. Frigate now binds
+      # 5000 on IPv4 loopback only (see config_frigate.yml), so Caddy listens on the
+      # backend (VLAN 3) ULA over IPv6 and proxies to it. The http:// prefix keeps
+      # the listener plaintext. The host in the site address is only a request
+      # matcher — Caddy still binds every interface unless told otherwise, which
+      # would grab 0.0.0.0:5000 and collide with Frigate's 127.0.0.1:5000 publish.
+      # `bind` pins the listener to the ULA so loopback:5000 stays free for Frigate.
+      http://[fd5a:715f:1edc:a703::22]:5000 {
+        bind fd5a:715f:1edc:a703::22
+        reverse_proxy 127.0.0.1:5000
       }
+  notify: Restart caddy
 
 - name: Install and start caddy
   ansible.builtin.apt:
@@ -14,39 +23,8 @@
     state: present
     update_cache: true
 
-# TODO: Add caddy config
-
-# The Caddyfile is an easy way to configure your Caddy web server.
-#
-# Unless the file starts with a global options block, the first
-# uncommented line is always the address of your site.
-#
-# To use your own domain name (with automatic HTTPS), first make
-# sure your domain's A/AAAA DNS records are properly pointed to
-# this machine's public IP, then replace ":80" below with your
-# domain name.
-
-# :80 {
-        # Set this path to your site's directory.
-        # root * /usr/share/caddy
-
-        # Enable the static file server.
-        # file_server
-
-        # Another common task is to set up a reverse proxy:
-#        reverse_proxy :5000
-
-        # Or serve a PHP site through php-fpm:
-        # php_fastcgi localhost:9000
-# }
-
-# Refer to the Caddy docs for more information:
-# https://caddyserver.com/docs/caddyfile
-
-# TODO: Start caddy service
-
-# - name: Start caddy service
-#   systemd:
-#     name: caddy
-#     state: started
-#     enabled: yes
+# Apply a Caddyfile change now, before config_frigate.yml creates the container —
+# otherwise the stale Caddy still holds 0.0.0.0:5000 and the publish of
+# 127.0.0.1:5000 fails with "address already in use".
+- name: Apply Caddy config before Frigate binds loopback:5000
+  ansible.builtin.meta: flush_handlers

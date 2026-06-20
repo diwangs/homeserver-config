@@ -2,5 +2,15 @@
 # Mutable resources. Read at creation (init_lxc.yml) and reconciled onto the live
 # container by roles/frigate/tasks/config_resources.yml (proxmox update: true).
 frigate_cores: 2
-frigate_memory: 1024 # 1 GB (frigate w/o ffmpeg restream)
+frigate_memory: 1024 # 1 GB (frigate w/ ffmpeg restream)
 frigate_swap: 4096
+
+# Network interfaces. Reconciled onto the live container by config_resources.yml
+# (update: true) — adding/changing a NIC requires a container restart.
+# ip6=manual: ifupdown only brings the link up; systemd-networkd owns addressing
+# (static ULA + DHCPv6/RA), configured in setup_networkd.yml. Mirrors the
+# Nextcloud DMZ LXC.
+frigate_netif:
+  net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip6=manual" # backend (VLAN 3)
+  net4: "name=eth4,bridge=vmbr1,tag=4,firewall=1,ip=dhcp"
+  net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual" # dmz (VLAN 6)

@@ -46,3 +46,8 @@
     node: "{{ proxmox_host }}"
     vmid: "{{ frigate_vmid }}"
     state: started
+
+# eth3/eth6 use ip6=manual, so the guest has no address until networkd runs.
+# Configure it host-side here, before the SSH-based docker layer targets ::22.
+- name: Set up systemd-networkd addressing
+  ansible.builtin.include_tasks: setup_networkd.yml

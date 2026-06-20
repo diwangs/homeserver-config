@@ -11,5 +11,3 @@
   ansible.builtin.include_tasks: config_portainer.yml
 - name: Set up Frigate
   ansible.builtin.include_tasks: config_frigate.yml
-# Watchtower is available but not currently enabled:
-# - ansible.builtin.include_tasks: config_watchtower.yml

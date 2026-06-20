@@ -22,7 +22,7 @@
         tasks_from: init_omada.yml
 
 - name: Provision Frigate tenant
-  hosts: docker
+  hosts: frigate
   tasks:
     - name: Provision Docker platform
       ansible.builtin.import_role:

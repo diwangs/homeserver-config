@@ -7,7 +7,26 @@
     shm_size: 82M # Recommended?
     state: started
     networks:
-      - name: host # Because frigate doesn't expose IPv6, we need to proxy them
+      - name: frigate-net # bridge + NAT66; per-port host binding splits the VLANs
+    # Per-host-IP published ports keep each service on the right VLAN:
+    #   - 5000 (unauth UI) on IPv4 loopback only; reached via Caddy (IPv6->IPv4).
+    #   - 8971 (auth UI) on IPv4 loopback only: Frigate's nginx is IPv4-only inside
+    #     the container, so it can't be published on the IPv6 backend (docker-proxy
+    #     would forward to the container's IPv6, where nothing listens). Left local.
+    #   - 8554/1984 (go2rtc, IPv6-capable inside) on the backend (VLAN 3) ULA ::22.
+    #   - 8555 WebRTC media on all IPv6 interfaces (serves the DMZ ULA + eth6 GUA;
+    #     both are IPv6, so [::] not 0.0.0.0 — the latter would only land on eth4's
+    #     IPv4). Kept off the backend by a PVE firewall rule dropping 8555 on eth3.
+    # WebRTC ICE candidates must be set in Frigate's go2rtc config (on the mounted
+    # /config volume) to the DMZ ULA + public domain — the container can't observe
+    # its host-side address behind NAT.
+    ports:
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:8971:8971"
+      - "[fd5a:715f:1edc:a703::22]:8554:8554"
+      - "[fd5a:715f:1edc:a703::22]:1984:1984"
+      - "[::]:8555:8555/udp" # All interface (including GUA), use firewall
+      - "[::]:8555:8555/tcp"
     volumes:
       - frigate_data:/data # For frigate.db to let disk spindown
       - /mnt/frigate/config:/config
