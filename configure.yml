@@ -8,26 +8,26 @@
 - name: Reconcile guest resources on the Proxmox host
   hosts: sentinel-lp
   tasks:
-    - name: Reconcile NAS resources
+    - name: Configure NAS LXC
       ansible.builtin.import_role:
         name: nas
-        tasks_from: config_resources.yml
+        tasks_from: config_lxc.yml
     - name: Reconcile Omada resources
       ansible.builtin.import_role:
         name: omada
-        tasks_from: config_resources.yml
+        tasks_from: config_lxc.yml
     - name: Reconcile Frigate resources
       ansible.builtin.import_role:
         name: frigate
-        tasks_from: config_resources.yml
+        tasks_from: config_lxc.yml
     - name: Reconcile Nextcloud resources
       ansible.builtin.import_role:
         name: nextcloud
-        tasks_from: config_resources.yml
+        tasks_from: config_lxc.yml
     - name: Reconcile seedbox resources
       ansible.builtin.import_role:
         name: seedbox
-        tasks_from: config_resources.yml
+        tasks_from: config_lxc.yml
     - name: Reconcile Home Assistant resources
       ansible.builtin.import_role:
         name: hass

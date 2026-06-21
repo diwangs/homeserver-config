@@ -1,6 +1,6 @@
 ---
 # Host-side (pct exec) systemd-networkd addressing for the Frigate LXC's interfaces.
-# Included at both init (init_lxc.yml) and reconcile (config_resources.yml).
+# Included at both init (init_lxc.yml) and reconcile (config_lxc.yml).
 #
 # eth3/eth6 use ip6=manual: ifupdown only brings the links up, so networkd owns
 # addressing. It must be driven host-side (pct exec) rather than over SSH, because

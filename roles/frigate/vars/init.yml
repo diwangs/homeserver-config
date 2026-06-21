@@ -8,7 +8,7 @@ frigate_hostname: frigate
 frigate_ostemplate: local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst
 frigate_disk: local-lvm:16 # 16 GB
 # frigate_netif moved to config.yml: it's now reconciled onto the live container
-# (config_resources.yml, update: true) so the DMZ NIC can be added without a
+# (config_lxc.yml, update: true) so the DMZ NIC can be added without a
 # rebuild. Container restart is required for netif changes to take effect.
 frigate_unprivileged: false # Required for passing GPU
 frigate_features:

@@ -1,6 +1,6 @@
 ---
 # Bounce the LXC to apply a netif change (new/changed NIC). Notified from
-# config_resources.yml's netif reconcile. Only fires on a real change, so it's a
+# config_lxc.yml's netif reconcile. Only fires on a real change, so it's a
 # handler rather than a `when: is changed` task. Defined before the networkd reload
 # so a netif-driven restart (which re-applies networkd on boot) runs first.
 - name: Restart Docker LXC

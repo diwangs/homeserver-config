@@ -26,3 +26,5 @@ Each port is published to a specific host address so services land on the right 
 - VLAN 4 -> iot (for connecting to cameras)
 - VLAN 6 -> dmz (WebRTC media / port 8555 only); LXC at `fd5a:715f:1edc:a706::22`
   - `frigate-webrtc.us.example.org`
+
+NOTE: in multi-interface host, the DHCP server (`odhcpd`) uses both DUID and MAC to distinguish interfaces

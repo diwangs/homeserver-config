@@ -1,0 +1,36 @@
+---
+# Reconcile mutable LXC config onto the live Nextcloud container. Runs on the
+# Proxmox host (configure.yml). Two concerns:
+#   - resources: `update: true` pushes cores/memory/swap into the existing container
+#     without recreating it (the same params are read at creation by init_lxc.yml).
+#   - bind mounts: lineinfile keyed on `^mp0:` reconciles the mount line in place.
+#     blockinfile is unusable here: Proxmox normalizes /etc/pve/lxc/103.conf and
+#     relocates the mp keys out of any markers, so a marked block gets re-added as a
+#     duplicate every run. A changed mount takes effect on the next container restart.
+- name: Load Nextcloud resource parameters
+  ansible.builtin.include_vars: "{{ item }}"
+  loop:
+    - init.yml # for nextcloud_vmid
+    - config.yml
+
+- name: Reconcile Nextcloud LXC resources
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    node: "{{ proxmox_host }}"
+    vmid: "{{ nextcloud_vmid }}"
+    # hostname is immutable, but the proxmox module requires it whenever
+    # state=present (the default) — pass it through unchanged.
+    hostname: "{{ nextcloud_hostname }}"
+    cores: "{{ nextcloud_cores }}"
+    memory: "{{ nextcloud_memory }}"
+    swap: "{{ nextcloud_swap }}"
+    update: true
+
+- name: Bind mount Nextcloud AIO borg backup directory into nextcloud
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/103.conf
+    regexp: "^mp0:"
+    line: "mp0: /mnt/frontpanel-pool/frontpanel-dataset/Backup/nextcloud-aio-borg,mp=/mnt/nextcloud-aio-borg"
+    state: present

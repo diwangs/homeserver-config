@@ -1,6 +1,6 @@
 ---
 # Immutable provisioning of the Frigate/Docker LXC. Runs on the Proxmox host;
-# create-once. Mutable resources are owned by config_resources.yml — read here only
+# create-once. Mutable resources are owned by config_lxc.yml — read here only
 # to size the container at creation time.
 - name: Load Docker container parameters
   ansible.builtin.include_vars: "{{ item }}"

@@ -1,6 +1,6 @@
 ---
 # Mutable resources. Read at creation (init_lxc.yml) and reconciled onto the live
-# container by roles/nextcloud/tasks/config_resources.yml (proxmox update: true).
+# container by roles/nextcloud/tasks/config_lxc.yml (proxmox update: true).
 nextcloud_cores: 2
 nextcloud_memory: 512 # 512 MB (nextcloud AIO)
 nextcloud_swap: 2048

@@ -1,6 +1,6 @@
 ---
 # Immutable provisioning of the Omada LXC. Runs on the Proxmox host; create-once.
-# Mutable resources are owned by config_resources.yml — read here only to size the
+# Mutable resources are owned by config_lxc.yml — read here only to size the
 # container at creation time.
 - name: Load Omada container parameters
   ansible.builtin.include_vars: "{{ item }}"

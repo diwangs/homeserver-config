@@ -7,7 +7,7 @@ nextcloud_hostname: nextcloud
 # Not compatible with update. Lazily templated, so debian13_template need only be
 # registered by the time init_lxc.yml runs (same sentinel-lp play).
 nextcloud_ostemplate: "local:vztmpl/{{ debian13_template.stdout }}"
-nextcloud_disk: local-lvm:8 # 8 GB
+nextcloud_disk: local-lvm:100 # 100 GB to store actual data
 nextcloud_netif:
   # dmz
   # ip6=manual: ifupdown only brings eth6 up; systemd-networkd owns addressing
@@ -16,3 +16,4 @@ nextcloud_netif:
 nextcloud_unprivileged: true # Nextcloud data comes from a shared host mountpoint, not SMB
 nextcloud_features:
   - nesting=1 # Required to run docker
+  - fuse=1 # Required for Borg Backup

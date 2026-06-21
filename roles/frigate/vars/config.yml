@@ -1,11 +1,11 @@
 ---
 # Mutable resources. Read at creation (init_lxc.yml) and reconciled onto the live
-# container by roles/frigate/tasks/config_resources.yml (proxmox update: true).
+# container by roles/frigate/tasks/config_lxc.yml (proxmox update: true).
 frigate_cores: 2
 frigate_memory: 1024 # 1 GB (frigate w/ ffmpeg restream)
 frigate_swap: 4096
 
-# Network interfaces. Reconciled onto the live container by config_resources.yml
+# Network interfaces. Reconciled onto the live container by config_lxc.yml
 # (update: true) — adding/changing a NIC requires a container restart.
 # ip6=manual: ifupdown only brings the link up; systemd-networkd owns addressing
 # (static ULA + DHCPv6/RA), configured in setup_networkd.yml. Mirrors the

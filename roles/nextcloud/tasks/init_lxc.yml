@@ -1,6 +1,6 @@
 ---
 # Immutable provisioning of the Nextcloud/DMZ LXC. Runs on the Proxmox host;
-# create-once. Mutable resources are owned by config_resources.yml — read here only
+# create-once. Mutable resources are owned by config_lxc.yml — read here only
 # to size the container at creation time.
 - name: Load Nextcloud container parameters
   ansible.builtin.include_vars: "{{ item }}"
@@ -39,13 +39,6 @@
     owner: diwangs
     group: diwangs
     mode: "0770"
-
-- name: Bind mount shared Nextcloud directory into nextcloud
-  ansible.builtin.blockinfile:
-    path: /etc/pve/lxc/103.conf
-    marker: "# {mark} ANSIBLE nextcloud-mp"
-    block: |
-      mp0: /home/diwangs/nextcloud,mp=/mnt/lvm-nextcloud
 
 - name: Pass through Nextcloud (www-data) user
   ansible.builtin.include_tasks: init_passthrough_nextcloud_user.yml

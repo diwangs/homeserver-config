@@ -52,10 +52,10 @@ It has the following hardware:
     - Shared UID user -> so that it could be accessed without SMB
     - New group -> so that it could be accessed by the designated SMB user
 - Mountpoint passthrough vs SMB mount
-  - Mountpoint pros -> no network load
-  - Mountpoint cons -> user must be passed through (or be in privileged container)
-  - SMB mount pros -> could translate UID and GID
-  - SMB mount cons -> must be in privileged container, introduces network load
+  - Mountpoint pros -> no network load, instant
+  - Mountpoint cons -> user must be passed through (or be in privileged container), might have permission differences
+  - SMB mount pros -> could translate UID and GID and permissions
+  - SMB mount cons -> must be in privileged container, introduces network load, wait till NAS is online
 
 ## Omada
 - TP-Link's SDN
