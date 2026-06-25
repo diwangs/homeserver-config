@@ -8,6 +8,8 @@
 - name: Reconcile guest resources on the Proxmox host
   hosts: sentinel-lp
   tasks:
+    - name: Reconcile hd-idle spindown for disks with broken -S timers
+      ansible.builtin.import_tasks: roles/hd-idle.yml
     - name: Configure NAS LXC
       ansible.builtin.import_role:
         name: nas

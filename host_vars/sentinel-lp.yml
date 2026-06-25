@@ -10,11 +10,22 @@ hdparm_devices:
   - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_5QK4975B
     options:
       - "apm = 127"
+      # NOTE: this drive's firmware ignores spindown_time (-S) — it never auto-spins
+      # down even when freshly set, confirmed across a cold power cycle. apm still
+      # applies. Actual spindown is handled by hd-idle (see hd_idle_devices below).
       - "spindown_time = 240"
   - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_D7J6PRPN
     options:
       - "apm = 127"
       - "spindown_time = 240"
+
+# hd-idle targets: disks whose firmware -S timer is broken and need OS-driven spindown
+# via STANDBY IMMEDIATE. Only 5QK4975B — its auto-standby is permanently dead (obeys
+# hdparm -y, ignores -S, survived a cold power cycle on a clean link). The other two
+# disks honor the spindown_time above normally and are left to hd-idle's `-i 0` default.
+hd_idle_devices:
+  - id: ata-WDC_WD120EFBX-68B0EN0_5QK4975B
+    idle: 1200 # 20 mins, matches the spindown_time intent for the other disks
 
 # After usbip is installed, run `usbip list -l` to get the busid
 # Serial: Silicon Labs: CP210x UART bridge (careful, it's the same as skyconnect)
