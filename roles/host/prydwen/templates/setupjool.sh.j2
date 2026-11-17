@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+namespace='{{ prydwen_jool.namespace }}'
+peer='{{ prydwen_jool.peer_device }}'
+router='{{ prydwen_jool.router_device }}'
+
+if ip netns list | awk '{ print $1 }' | grep -qx "$namespace"; then
+    exit 0
+fi
+
+cleanup() {
+    ip netns del "$namespace" 2>/dev/null || true
+    ip link del "$router" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+ip link add "$router" type veth peer "$peer"
+ip netns add "$namespace"
+ip link set dev "$peer" netns "$namespace"
+
+ip netns exec "$namespace" sh <<'EOF'
+set -eu
+sysctl -w net.ipv4.conf.all.forwarding=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+sysctl -w net.ipv6.conf.{{ prydwen_jool.peer_device }}.accept_ra=2
+sysctl -w net.ipv4.ip_local_port_range='{{ prydwen_jool.reserved_ports | replace('-', ' ') }}'
+ip link set dev lo up
+ip link set dev {{ prydwen_jool.peer_device }} up
+ip addr add dev {{ prydwen_jool.peer_device }} {{ prydwen_jool.translator_ipv4 }}
+ip addr add dev {{ prydwen_jool.peer_device }} {{ prydwen_jool.link_local }}
+ip route add default via {{ prydwen_jool.translator_gateway }}
+modprobe jool
+jool instance add --netfilter --pool6 {{ prydwen_jool.pool6 }}
+jool global update lowest-ipv6-mtu 1500
+jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --tcp
+jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --udp
+jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --icmp
+EOF
+
+trap - EXIT INT TERM

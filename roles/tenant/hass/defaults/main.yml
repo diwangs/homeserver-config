@@ -1,0 +1,26 @@
+---
+# Home Assistant VM (KVM, not LXC — hence its own role rather than proxmox_lxc).
+# This tenant role runs on the Proxmox host; HAOS manages the guest itself.
+# Creation parameters, applied once by tasks/create.yml and never reconciled:
+hass_vmid: 200
+hass_name: hass
+hass_machine: q35
+hass_ostype: l26
+hass_bios: ovmf
+hass_efidisk0:
+  storage: local-lvm
+  efitype: 4m
+  format: raw
+  pre_enrolled_keys: false
+hass_sockets: 1
+hass_net:
+  # Backend VLAN, because we need to connect to IoT and stuffs
+  net0: virtio,bridge=vmbr1,tag=3,firewall=1
+hass_scsihw: virtio-scsi-single
+hass_usb:
+  usb0: "host={{ skyconnect_busid }}" # skyconnect_busid: host_vars/sentinel-lp.yml
+
+# Mutable resources. Read at creation and reconciled onto the live VM by
+# tasks/reconcile.yml (proxmox_kvm update: true). No swap: this is a VM.
+hass_cores: 2
+hass_memory: 6144

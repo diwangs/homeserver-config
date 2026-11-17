@@ -1,0 +1,16 @@
+---
+# Notified from tasks/main.yml when secrets or the NixOS system change. The
+# rebuild re-runs activation, but both Hermes processes read their configuration
+# at startup. Handlers run after the rebuild so they pick up the new settings.
+#
+# Container restarts for netif changes are handled host-side by roles/host/proxmox_lxc
+# (reconcile_netif), which this guest doesn't set: its single NIC is fixed at creation.
+- name: Restart Hermes Agent
+  ansible.builtin.systemd_service:
+    name: hermes-agent
+    state: restarted
+
+- name: Restart Hermes Backend
+  ansible.builtin.systemd_service:
+    name: hermes-backend
+    state: restarted

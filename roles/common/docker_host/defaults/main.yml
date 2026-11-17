@@ -1,0 +1,40 @@
+---
+# Docker engine for a Debian tenant (inventory group lxc_docker). Immutable
+# in-tenant platform, applied by playbooks/init_tenant.yml; per-host values live in
+# host_vars/<tenant>.yml.
+
+# Add `"ip6tables": true` to daemon.json (NAT66 for IPv6-enabled bridges).
+docker_host_ip6tables: true
+
+# Per-container log rotation (json-file driver). Docker's default never rotates: on
+# frigate a single container log reached 3.8 GB and filled the 16 GB rootfs. Applies
+# to containers created after daemon.json changes; recreate older ones to pick it up.
+docker_host_log_max_size: 50m
+docker_host_log_max_file: "3"
+
+# Optional dedicated IPv6 bridge: {name, subnet}. Empty = none.
+docker_host_bridge_network: {}
+# Required ipvlan network on a VLAN interface: {name, parent, subnet, gateway, iprange}.
+#
+# We use ipvlan for the Docker network, which offers these advantages:
+# 1. Unlike bridge, it doesn't do address translation, which is not necessary
+#   for IPv6. Because it doesn't do address translation, each container is able
+#   to own an IP address and is routable.
+# 2. As a result, it's not necessary to do port mapping too.
+# 3. (Nit) Less pressure on the switch compared to macvlan.
+#
+# While technically supports VLAN, it seems to have problem with nested VLAN
+# of LXC? To create another VLAN, create new interface first.
+#
+# The only disadvantage is that it doesn't integrate with the router's DHCPv6
+# and RA in general, which means it doesn't support dynamic prefix for globally
+# routable address. Miraculously, even if each container doesn't have a
+# globally routable address they can still communicate with the outside world,
+# as long as the parent interface has a globally routable address (e.g., eth0)
+# ADDED: globally routable only if SLAAC is enabled
+#
+# Note on bridges: some setups (e.g., Nextcloud AIO) assume a bridge network, which
+# relies on the host address. This could be problematic if we only want to publicly
+# expose some services. Our current solution is just to use the ipvlan network and
+# adjust firewall manually.
+docker_host_ipvlan_network: {}

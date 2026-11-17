@@ -1,0 +1,6 @@
+---
+# journald applies SystemMaxUse (and vacuums down to it) when it restarts.
+- name: Restart journald
+  ansible.builtin.systemd_service:
+    name: systemd-journald
+    state: restarted

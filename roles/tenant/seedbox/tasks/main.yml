@@ -1,0 +1,11 @@
+---
+# Mutable in-tenant config: the torrent SMB mount. Re-runnable; driven by
+# playbooks/configure.yml.
+- name: Set up storage
+  ansible.builtin.include_role:
+    name: cifs_mount
+  vars:
+    cifs_mount_share: torrent
+    cifs_mount_username: "{{ seedbox_torrent_smb_username }}"
+    cifs_mount_password: "{{ seedbox_torrent_smb_password }}"
+    cifs_mount_nofail: true

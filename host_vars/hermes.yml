@@ -1,0 +1,56 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 107
+  hostname: hermes
+  # The second NixOS tenant, after matrix: a NixOS tarball built from
+  # roles/tenant/hermes/files/nixos by roles/tenant/hermes/tasks/build_template.yml.
+  template: nixos
+  template_role: hermes
+  ostype: nixos
+  nixos_path_shim: true
+  # Agent state (sessions, memories, skills, checkpoints) plus the workspace, on the
+  # Optane rootfs. Backups go to ZFS via mp0. Sized well above matrix's 32 not for
+  # the state — which is small — but for the Nix store: this closure carries two
+  # nixpkgs (see files/nixos/flake.nix) and hermes-agent's whole uv2nix Python
+  # closure, and `nixos-rebuild switch` needs room for both the old and new
+  # generation before the old one is collected.
+  disk: local-lvm:64
+  cores: 2
+  # Hermes' uv2nix closure can use more than 4 GiB of RAM and 4 GiB of swap during
+  # `nixos-rebuild switch`. Keep the live container and future reconciliations at
+  # 8 GiB each so an update can complete without severe memory pressure.
+  memory: 8192
+  swap: 8192
+  netif:
+    # backend (VLAN 3). Deliberately not the dmz: there is no wan->backend
+    # forwarding at all, so nothing from the internet reaches this container even
+    # though the interface also holds a GUA. This is a private tool, not a
+    # published service.
+    #
+    # ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix. hwaddr is pinned so the router's lease (which
+    # matches on mac as well as duid) stays valid if the container is recreated.
+    net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip6=manual,hwaddr=BC:24:11:0E:12:5C"
+    # No eth46/CLAT NIC, unlike matrix. Hermes and everything it shells out to go
+    # through getaddrinfo, so dnsmasq synthesises 64:ff9b::/96 and the existing
+    # backend->nat64 forwarding carries it.
+  unprivileged: true
+  features:
+    - nesting=1 # Required by the Nix daemon's build sandbox
+    # No fuse: backups are the application's own (`hermes backup`), not borg.
+  # Repository for `hermes backup` archives, on the encrypted RAID-Z pool.
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Backup/hermes
+      owner: diwangs
+      group: diwangs
+      mode: "0770"
+  # The hermes service user is pinned to uid 1000 in files/nixos/configuration.nix.
+  idmap:
+    id: 1000
+    host_id: 1000
+  config_lines:
+    # Destination of `hermes backup` (the hermes-backup unit in configuration.nix).
+    # First run: a manual `pct reboot 107` is needed once (see roles/tenant/hermes/README.md).
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Backup/hermes,mp=/mnt/hermes-backup

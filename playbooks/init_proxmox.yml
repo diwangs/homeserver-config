@@ -1,0 +1,43 @@
+---
+# Provisioning, stage 1 of 2 — runs on the Proxmox host. Creates the
+# containers/VM and lays down their immutable per-guest platform that lives on the
+# host side (resources at creation, UID passthrough, bind mounts, bootstrap
+# networking). Works on a cold host: guests are reached with `pct exec`, not over
+# the network (hermes-gateway's NixOS template is built inside hermes, CT107).
+#
+# Cold-start flow:
+#   1. run playbooks/init_proxmox.yml  — creates the guests,
+#   2. set the static DHCPv6 leases for the new guests (internet egress),
+#   3. run playbooks/init_tenant.yml   — provisions inside each guest.
+# Both init playbooks are idempotent, so re-running either is safe.
+#
+# After both, run playbooks/configure.yml for the mutable resource + application
+# layer. Guest definitions live in host_vars/<guest>.yml (`proxmox_lxc`).
+
+- name: Create guests on the Proxmox host
+  hosts: sentinel-lp
+  # Every Proxmox API call in this play talks to the local PVE node as root@pam.
+  # validate_certs: PVE's API cert is self-signed and reached via the `sentinel-lp`
+  # hostname, so verification would fail.
+  module_defaults:
+    group/community.proxmox.proxmox:
+      api_host: "{{ proxmox_host }}"
+      api_user: "{{ proxmox_user }}"
+      api_password: "{{ proxmox_password }}"
+      node: "{{ proxmox_host }}"
+      validate_certs: false
+  roles:
+    - role: geerlingguy.hdparm
+    - role: zfs
+    # Registers proxmox_templates_debian13, read by proxmox_lxc below.
+    - role: proxmox_templates
+    # - role: usbip
+  tasks:
+    - name: Create LXC guests
+      ansible.builtin.import_role:
+        name: proxmox_lxc
+        tasks_from: create.yml
+    - name: Set up Home Assistant VM
+      ansible.builtin.import_role:
+        name: hass
+        tasks_from: create.yml

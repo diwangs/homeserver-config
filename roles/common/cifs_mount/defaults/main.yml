@@ -1,0 +1,14 @@
+---
+# Mount an SMB share from the NAS into a tenant. We mount CIFS shares to the
+# tenant and then bind mount them into containers. This might be less efficient
+# than using an LXC mount, but it is more modular.
+#
+# PROTOCOL: for a share named `<share>`, create a user named `<share>user`.
+# NOTE: if the share name is the same as a unix username, `home/<share>` will be
+# used instead as path.
+cifs_mount_share: "" # required; also names /mnt/<share> and /root/<share>smbcred
+cifs_mount_server: "{{ hostvars['nas'].ansible_host }}"
+cifs_mount_username: "" # required
+cifs_mount_password: "" # required (vault)
+cifs_mount_label: "{{ cifs_mount_share }}" # human-readable name for task titles
+cifs_mount_nofail: false # add `nofail` so boot doesn't block on the NAS

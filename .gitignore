@@ -10,3 +10,15 @@
 *.swp
 .DS_Store
 .vscode
+
+# Automation SSH identity — private half NEVER commit, public half is tracked
+.ssh/*
+!.ssh/*.pub
+
+# Real hostnames / Fly app identity — committed as *.example templates instead
+extern/ipv4-proxy/nginx.conf
+extern/ipv4-proxy/fly.toml
+
+# Rendered by Ansible from the vault into the flake build/deploy copies; never
+# belongs in the source tree
+roles/tenant/*/files/nixos/site.nix

@@ -1,0 +1,968 @@
+---
+# community.openwrt uses shell modules; keep temporary payloads in RAM-backed /tmp.
+openwrt_remote_tmp: /tmp
+openwrt_scp_if_ssh: smart
+
+prydwen_cloudflare_api_token: "{{ vault_openwrt_cloudflare_api_token }}"
+prydwen_root_password_hash: "{{ vault_openwrt_root_password_hash }}"
+
+prydwen_physical_devices:
+  - lan0
+  - lan1
+  - lan2
+  - lan3
+
+prydwen_wan_device: lan0
+prydwen_backend_device: lan3.3
+prydwen_dmz_device: lan3.6
+
+prydwen_ssh_authorized_keys: "{{ managed_authorized_keys }}"
+
+# Capability packages only. Board-specific drivers remain the firmware's concern.
+prydwen_packages:
+  - ca-certificates
+  - ddns-scripts-cloudflare
+  - drill
+  - ip-full
+  - jool-tools-netfilter
+  - kmod-sched-cake
+  - kmod-veth
+  - luci-app-attendedsysupgrade
+  - luci-app-ddns
+  - luci-app-firewall
+  - luci-app-https-dns-proxy
+  - luci-app-sqm
+  - luci-app-tor
+  - luci-ssl
+  - tc-tiny
+
+prydwen_absent_packages:
+  - qosify
+
+prydwen_lan_qos_devices:
+  - lan1
+  - lan3
+
+prydwen_services:
+  - network
+  - firewall
+  - dnsmasq
+  - odhcpd
+  - https-dns-proxy
+  - ddns
+  - lan-qos
+  - sqm
+  - tor
+  - uhttpd
+  - dropbear
+
+prydwen_stale_files:
+  - /etc/config/qosify
+  - /etc/config/https-dns-proxy-opkg
+  - /etc/config/luci-opkg
+  - /etc/config/privoxy
+  - /etc/config/stubby
+  - /etc/config/tinyproxy
+  - /etc/config/tor-opkg
+  - /etc/config/ucitrack-opkg
+  - /etc/config/uhttpd-opkg
+
+prydwen_jool:
+  namespace: jool
+  peer_device: openwrt
+  router_device: jool
+  router_ipv4: 192.168.64.1/24
+  translator_ipv4: 192.168.64.2/24
+  translator_address: 192.168.64.2
+  translator_gateway: 192.168.64.1
+  link_local: fe80::64
+  pool6: 64:ff9b::/96
+  reserved_ports: 32768-32999
+  translated_ports: 33000-65535
+
+# Named defaults and disabled leftovers that conflict with this topology.
+prydwen_uci_absent_options:
+  - network.lan
+  - network.wan6
+  - dhcp.lan
+  - ddns.myddns_ipv4
+  - ddns.myddns_ipv6
+  - tor-hs.sshd
+  - tor-hs.nextcloud
+
+prydwen_uci_absent_sections:
+  # End hosts own DSCP classification; prydwen only queues existing markings.
+  - { config: firewall, type: rule, find: { name: Prioritize-USBIP-to-server } }
+  - { config: firewall, type: rule, find: { name: Prioritize-USBIP-from-server } }
+  - { config: firewall, type: rule, find: { name: Prioritize-Sunshine-TCP-to-server } }
+  - { config: firewall, type: rule, find: { name: Prioritize-Sunshine-TCP-from-server } }
+  - { config: firewall, type: rule, find: { name: Prioritize-Sunshine-UDP-to-server } }
+  - { config: firewall, type: rule, find: { name: Prioritize-Sunshine-UDP-from-server } }
+  - config: firewall
+    type: zone
+    find:
+      name: lan
+  - config: firewall
+    type: forwarding
+    find:
+      src: lan
+      dest: wan
+  - config: https-dns-proxy
+    type: https-dns-proxy
+    find:
+      resolver_url: https://cloudflare-dns.com/dns-query
+  - config: https-dns-proxy
+    type: https-dns-proxy
+    find:
+      resolver_url: https://dns.google/dns-query
+  - config: network
+    type: route6
+    find:
+      target: 64:ff9a::/96
+
+# Values applied to packaged/generated sections without replacing their defaults.
+prydwen_uci_values:
+  - key: system.@system[0]
+    value:
+      hostname: prydwen
+      zonename: America/New_York
+      timezone: EST5EDT,M3.2.0,M11.1.0
+  - key: network.loopback
+    value:
+      device: lo
+      proto: static
+      ipaddr: 127.0.0.1
+      netmask: 255.0.0.0
+  - key: network.globals
+    value:
+      ula_prefix: fd5a:715f:1edc:a700::/56
+      packet_steering: "1"
+  - key: dhcp.@dnsmasq[0]
+    value:
+      noresolv: "1"
+      strictorder: "1"
+      doh_backup_noresolv: "1"
+      doh_backup_server:
+        - 0::1#5453
+      doh_server:
+        - ::1#5053
+        - ::1#5054
+      server:
+        - ::1#5054
+        - ::1#5053
+  - key: firewall.@defaults[0]
+    value:
+      synflood_protect: "1"
+      drop_invalid: "1"
+  - key: dropbear.@dropbear[0]
+    value:
+      PasswordAuth: "on"
+      RootPasswordAuth: "on"
+      Port: "22"
+      Interface: internal
+  - key: https-dns-proxy.config
+    value:
+      dnsmasq_config_update: "*"
+      force_dns: "0"
+      force_dns_port:
+        - "53"
+        - "853"
+      procd_trigger_wan6: "0"
+      verbosity: "1"
+  - key: sqm.eth1
+    value:
+      enabled: "1"
+      interface: "{{ prydwen_wan_device }}"
+      download: "330000"
+      upload: "330000"
+      qdisc: cake
+      script: piece_of_cake.qos
+      linklayer: ethernet
+      overhead: "44"
+  - key: tor.conf
+    value:
+      default: /etc/tor/torrc
+      generated: /tmp/torrc
+      tail_include:
+        - /etc/tor/torrc
+        - /etc/tor/torrc_generated
+        - /etc/tor/socks.conf
+        - /etc/tor/torrc_custom
+  - key: tor-hs.common
+    value:
+      GenConf: /etc/tor/torrc_generated
+      HSDir: /etc/tor/hidden_service
+      RestartTor: "true"
+      UpdateTorConf: "true"
+  - key: uhttpd.main
+    value:
+      redirect_https: "1"
+
+# Every custom section has a stable UCI identifier. Packaged defaults remain implicit.
+prydwen_uci_sections:
+  # Physical, VLAN, and bridge devices.
+  - config: network
+    type: device
+    name: device_lan0
+    find: { name: lan0 }
+    value: {}
+  - config: network
+    type: device
+    name: device_lan1
+    find: { name: lan1 }
+    value:
+      ipv6: "1"
+      ip6segmentrouting: "1"
+      acceptlocal: "1"
+  - config: network
+    type: device
+    name: device_lan2
+    find: { name: lan2 }
+    value:
+      ipv6: "1"
+  - config: network
+    type: device
+    name: device_lan3
+    find: { name: lan3 }
+    value:
+      ipv6: "1"
+      ip6segmentrouting: "1"
+  - config: network
+    type: device
+    name: vlan_lan1_2
+    find: { name: lan1.2 }
+    value: { type: 8021q, ifname: lan1, vid: "2", ipv6: "1" }
+  - config: network
+    type: device
+    name: vlan_lan2_2
+    find: { name: lan2.2 }
+    value: { type: 8021q, ifname: lan2, vid: "2", ipv6: "1" }
+  - config: network
+    type: device
+    name: bridge_internal
+    find: { name: br-internal }
+    value:
+      type: bridge
+      ports: [lan1.2, lan2.2]
+  - config: network
+    type: device
+    name: bridge_infra
+    find: { name: br-infra }
+    value:
+      type: bridge
+      ports: [lan1, lan2, lan3]
+  - config: network
+    type: device
+    name: vlan_lan3_3
+    find: { name: lan3.3 }
+    value:
+      type: 8021q
+      ifname: lan3
+      vid: "3"
+      acceptlocal: "1"
+      ipv6: "1"
+      ip6segmentrouting: "1"
+  - config: network
+    type: device
+    name: vlan_lan1_4
+    find: { name: lan1.4 }
+    value: { type: 8021q, ifname: lan1, vid: "4", ipv6: "1" }
+  - config: network
+    type: device
+    name: vlan_lan2_4
+    find: { name: lan2.4 }
+    value: { type: 8021q, ifname: lan2, vid: "4", ipv6: "1" }
+  - config: network
+    type: device
+    name: vlan_lan3_4
+    find: { name: lan3.4 }
+    value: { type: 8021q, ifname: lan3, vid: "4", ipv6: "1" }
+  - config: network
+    type: device
+    name: bridge_iot
+    find: { name: br-iot }
+    value:
+      type: bridge
+      ports: [lan1.4, lan2.4, lan3.4]
+  - config: network
+    type: device
+    name: vlan_lan1_5
+    find: { name: lan1.5 }
+    value: { type: 8021q, ifname: lan1, vid: "5", ipv6: "1" }
+  - config: network
+    type: device
+    name: vlan_lan2_5
+    find: { name: lan2.5 }
+    value: { type: 8021q, ifname: lan2, vid: "5", ipv6: "1" }
+  - config: network
+    type: device
+    name: bridge_guest
+    find: { name: br-guest }
+    value:
+      type: bridge
+      ports: [lan1.5, lan2.5]
+  - config: network
+    type: device
+    name: vlan_lan3_6
+    find: { name: lan3.6 }
+    value: { type: 8021q, ifname: lan3, vid: "6" }
+
+  # Layer-3 interfaces and NAT64 route.
+  - config: network
+    type: interface
+    name: wan
+    find: { device: lan0, proto: dhcpv6 }
+    value:
+      reqaddress: try
+      reqprefix: auto
+      peerdns: "0"
+      dns: [2001:4860:4860::6464, 2001:4860:4860::64]
+      dns_metric: "50"
+  - config: network
+    type: interface
+    name: wan4
+    find: { device: lan0, proto: dhcp }
+    value:
+      peerdns: "0"
+      delegate: "0"
+      dns: [9.9.9.9, 149.112.112.112]
+      dns_metric: "55"
+  - config: network
+    type: interface
+    name: nat64
+    find: { device: jool }
+    value:
+      proto: static
+      ipaddr: 192.168.64.1
+      netmask: 255.255.255.0
+      ip6assign: "64"
+      ip6hint: "64"
+      delegate: "0"
+  - config: network
+    type: route6
+    name: route_nat64
+    find: { target: "64:ff9b::/96" }
+    value:
+      interface: nat64
+      gateway: fe80::64
+  - config: network
+    type: interface
+    name: internal
+    find: { device: br-internal }
+    value:
+      proto: static
+      delegate: "0"
+      ip6assign: "64"
+      ip6hint: "2"
+      dns: ["::1"]
+      multipath: "off"
+  - config: network
+    type: interface
+    name: infra
+    find: { device: br-infra, proto: static }
+    value:
+      ip6assign: "64"
+      ip6hint: "1"
+      delegate: "0"
+      ip6class: [local]
+      auto: "0"
+  - config: network
+    type: interface
+    name: infra4
+    find: { device: br-infra, ipaddr: 192.168.1.1 }
+    value:
+      proto: static
+      netmask: 255.255.255.0
+      delegate: "0"
+  - config: network
+    type: interface
+    name: backend
+    find: { device: lan3.3 }
+    value:
+      proto: static
+      delegate: "0"
+      ip6assign: "64"
+      ip6hint: "3"
+  - config: network
+    type: interface
+    name: backend4
+    find: { device: lan3.3, ipaddr: 192.168.3.1 }
+    value:
+      proto: static
+      netmask: 255.255.255.0
+      delegate: "0"
+  - config: network
+    type: interface
+    name: iot
+    find: { device: br-iot, proto: static }
+    value:
+      delegate: "0"
+      ip6assign: "64"
+      ip6hint: "4"
+      ip6class: [local]
+      auto: "0"
+  - config: network
+    type: interface
+    name: iot4
+    find: { device: br-iot, ipaddr: 192.168.4.1 }
+    value:
+      proto: static
+      netmask: 255.255.255.0
+      delegate: "0"
+  - config: network
+    type: interface
+    name: guest
+    find: { device: br-guest }
+    value:
+      proto: static
+      delegate: "0"
+      ip6assign: "64"
+      ip6hint: "5"
+  - config: network
+    type: interface
+    name: guest4
+    find: { device: br-guest, ipaddr: 192.168.5.1 }
+    value:
+      proto: static
+      netmask: 255.255.255.0
+      delegate: "0"
+  - config: network
+    type: interface
+    name: dmz
+    find: { device: lan3.6 }
+    value:
+      proto: static
+      delegate: "0"
+      ip6assign: "64"
+      ip6hint: "6"
+      multipath: "off"
+  - config: network
+    type: interface
+    name: dmz4
+    find: { device: lan3.6, ipaddr: 192.168.6.1 }
+    value:
+      proto: static
+      netmask: 255.255.255.0
+      delegate: "0"
+      auto: "0"
+
+  # DHCP and router advertisements. Common start/limit/lease defaults are omitted.
+  - config: dhcp
+    type: dhcp
+    name: wan
+    find: { interface: wan }
+    value: { ignore: "1" }
+  - config: dhcp
+    type: dhcp
+    name: nat64
+    find: { interface: nat64 }
+    value: { ignore: "1", ra: server }
+  - config: dhcp
+    type: dhcp
+    name: internal
+    find: { interface: internal }
+    value:
+      ra: server
+      dhcpv6: server
+      dhcp_option: ["108,0:0:7:8"]
+      ra_flags: [managed-config, other-config]
+      ra_preference: medium
+      ra_pref64: "64:ff9b::/96"
+  - config: dhcp
+    type: dhcp
+    name: backend
+    find: { interface: backend }
+    value:
+      leasetime: 10m
+      dhcp_option: ["108,0:0:7:8"]
+      ra: server
+      ra_flags: [managed-config, other-config]
+      dhcpv6: server
+  - config: dhcp
+    type: dhcp
+    name: backend4
+    find: { interface: backend4 }
+    value: { leasetime: 5m, dynamicdhcp: "0" }
+  - config: dhcp
+    type: dhcp
+    name: infra
+    find: { interface: infra }
+    value:
+      ra: server
+      ra_flags: [managed-config, other-config]
+      dhcpv6: server
+      dhcp_option: ["108,0:0:7:8"]
+      ra_slaac: "0"
+  - config: dhcp
+    type: dhcp
+    name: infra4
+    find: { interface: infra4 }
+    value: {}
+  - config: dhcp
+    type: dhcp
+    name: iot
+    find: { interface: iot }
+    value:
+      ra: server
+      ra_flags: [managed-config, other-config]
+      dhcpv6: server
+      dhcp_option: ["108,0:0:7:8"]
+  - config: dhcp
+    type: dhcp
+    name: iot4
+    find: { interface: iot4 }
+    value: { leasetime: 5m }
+  - config: dhcp
+    type: dhcp
+    name: guest
+    find: { interface: guest }
+    value:
+      ra: server
+      ra_flags: [managed-config, other-config]
+      dhcpv6: server
+      dhcp_option: ["108,0:0:7:8"]
+  - config: dhcp
+    type: dhcp
+    name: guest4
+    find: { interface: guest4 }
+    value: {}
+  - config: dhcp
+    type: dhcp
+    name: dmz
+    find: { interface: dmz }
+    value:
+      ra: server
+      dhcpv6: server
+      ra_flags: [managed-config, other-config]
+      dhcp_option: ["108,0:0:7:8"]
+      ra_preference: medium
+      ra_slaac: "0"
+  - config: dhcp
+    type: dhcp
+    name: dmz4
+    find: { interface: dmz4 }
+    value: {}
+
+  # Static IPv6 and IPv4 leases.
+  - config: dhcp
+    type: host
+    name: host_paladin_iii
+    find: { name: paladin-iii }
+    value: { hostid: "10", leasetime: 3h, duid: ["000406b89e615015bb5e8facc04a17bda0d5"] }
+  - config: dhcp
+    type: host
+    name: host_cam_indoor_v6
+    find: { name: cam-indoor, duid: "00010001fffbe006a06032037bbb" }
+    value: { leasetime: 10m, hostid: "19" }
+  - config: dhcp
+    type: host
+    name: host_paladin_ii
+    find: { name: paladin-ii }
+    value: { duid: "0001000131185e1d0cdd2469ba86", mac: "2C:16:DB:A2:81:C9", hostid: "11", leasetime: 10m }
+  - config: dhcp
+    type: host
+    name: host_nas
+    find: { name: nas }
+    value: { duid: "000100012f05e88bbc241182dd26", mac: "BC:24:11:4A:84:68", hostid: "20", leasetime: 10m }
+  - config: dhcp
+    type: host
+    name: host_omada_v6
+    find: { name: omada, duid: "000100012f03d643bc24111754ba" }
+    value: { hostid: "21", leasetime: 10m }
+  - config: dhcp
+    type: host
+    name: host_frigate_backend
+    find: { name: frigate-backend }
+    value:
+      hostid: "22"
+      leasetime: 10m
+      duid: ["00020000ab111f881429a3da7a45%477236ad"]
+      mac: ["BC:24:11:E4:E8:19"]
+  - config: dhcp
+    type: host
+    name: host_frigate_dmz
+    find: { name: frigate-dmz }
+    value: { hostid: "22", leasetime: 10m, duid: ["00020000ab111f881429a3da7a45%54efee6a"] }
+  - config: dhcp
+    type: host
+    name: host_nextcloud
+    find: { name: nextcloud }
+    value: { leasetime: 10m, hostid: "23", duid: ["00020000ab110d469aa3877e37f4%7d9e78ea"] }
+  - config: dhcp
+    type: host
+    name: host_hass_v6
+    find: { name: hass, duid: "0004e51a93f40af30c514f366ca4f873ed66" }
+    value: { hostid: "24", leasetime: 10m }
+  - config: dhcp
+    type: host
+    name: host_seedbox_v6
+    find: { name: seedbox, duid: "000100012f6f9c40bc2411f3044c" }
+    value: { leasetime: 10m, hostid: "25" }
+  - config: dhcp
+    type: host
+    name: host_immich
+    find: { name: immich }
+    value:
+      leasetime: 10m
+      hostid: "26"
+      duid: ["00020000ab119aa14aeb62221c98%93634b9"]
+      mac: ["BC:24:11:D4:18:63"]
+  # Assigned, not discovered: the matrix guest pins this exact DUID/IAID in its
+  # image (roles/tenant/matrix/files/nixos/configuration.nix), so unlike every other lease
+  # here this one can be written before the container has ever booted.
+  - config: dhcp
+    type: host
+    name: host_matrix
+    find: { name: matrix }
+    value:
+      leasetime: 10m
+      hostid: "27"
+      duid: ["00020000ab116d6174726978006a%6d617472"]
+      mac: ["BC:24:11:A6:7C:C4"]
+  # Assigned, not discovered, for the same reason as matrix above — hermes is the
+  # other NixOS guest and pins this DUID/IAID in its image
+  # (roles/tenant/hermes/files/nixos/configuration.nix). Note there is deliberately no
+  # matching `ddns service` section: this one lives on backend and is not meant to
+  # resolve publicly.
+  - config: dhcp
+    type: host
+    name: host_hermes
+    find: { name: hermes }
+    value:
+      leasetime: 10m
+      hostid: "28"
+      duid: ["00020000ab116865726d6573006b%6865726d"]
+      mac: ["BC:24:11:0E:12:5C"]
+  - config: dhcp
+    type: host
+    name: host_hermes_gateway
+    find: { name: hermes-gateway }
+    value:
+      leasetime: 10m
+      hostid: "29"
+      duid: ["00020000ab116865726d6777006c%686d6777"]
+      mac: ["BC:24:11:6C:29:01"]
+  - config: dhcp
+    type: host
+    name: host_vertibird_ap_v6
+    find: { name: vertibird-ap, duid: "000100012D25036E6C5AB0289AD2" }
+    value: { hostid: "04", leasetime: 10m }
+  - config: dhcp
+    type: host
+    name: host_vertibird_desk
+    find: { name: vertibird-desk }
+    value: { ip: 192.168.1.2, mac: "14:EB:B6:2A:B1:F6", leasetime: 5m }
+  - config: dhcp
+    type: host
+    name: host_cam_indoor_v4
+    find: { name: cam-indoor, ip: 192.168.4.19 }
+    value: { mac: ["A0:60:32:03:7B:BB"], leasetime: 5m }
+  - config: dhcp
+    type: host
+    name: host_vertibird_rack
+    find: { name: vertibird-rack }
+    value: { mac: ["98:DA:C4:C2:F1:98"], ip: 192.168.1.3, leasetime: 5m }
+  - config: dhcp
+    type: host
+    name: host_omada_v4
+    find: { name: omada, ip: 192.168.1.21 }
+    value: { leasetime: 5m, mac: ["BC:24:11:1C:0C:92"] }
+  - config: dhcp
+    type: host
+    name: host_frigate_iot
+    find: { name: frigate-iot }
+    value: { ip: 192.168.4.22, leasetime: 5m, mac: ["BC:24:11:08:DC:42"] }
+  - config: dhcp
+    type: host
+    name: host_hass_v4
+    find: { name: hass, ip: 192.168.3.24 }
+    value: { mac: ["BC:24:11:FC:D0:6E"], leasetime: 5m }
+  - config: dhcp
+    type: host
+    name: host_seedbox_v4
+    find: { name: seedbox, ip: 192.168.3.25 }
+    value: { mac: ["BC:24:11:F3:04:4C"], leasetime: 5m }
+  - config: dhcp
+    type: host
+    name: host_vertibird_ap_v4
+    find: { name: vertibird-ap, ip: 192.168.1.4 }
+    value: { leasetime: 5m, mac: ["6C:5A:B0:28:9A:D2"] }
+
+  # Firewall zones and forwarding graph.
+  - config: firewall
+    type: zone
+    name: zone_internal
+    find: { name: internal }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [internal] }
+  - config: firewall
+    type: zone
+    name: zone_wan
+    find: { name: wan }
+    value: { input: REJECT, output: ACCEPT, forward: REJECT, masq: "1", mtu_fix: "1", network: [wan, wan4] }
+  - config: firewall
+    type: zone
+    name: zone_nat64
+    find: { name: nat64 }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [nat64] }
+  - config: firewall
+    type: zone
+    name: zone_backend
+    find: { name: backend }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [backend, backend4] }
+  - config: firewall
+    type: zone
+    name: zone_infra
+    find: { name: infra }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [infra, infra4] }
+  - config: firewall
+    type: zone
+    name: zone_iot
+    find: { name: iot }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [iot4, iot] }
+  - config: firewall
+    type: zone
+    name: zone_dmz
+    find: { name: dmz }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [dmz, dmz4] }
+  - config: firewall
+    type: zone
+    name: zone_guest
+    find: { name: guest }
+    value: { input: ACCEPT, output: ACCEPT, forward: ACCEPT, network: [guest, guest4], log: "1" }
+  - config: firewall
+    type: forwarding
+    name: forward_internal_wan
+    find: { src: internal, dest: wan }
+    value: {}
+  - { config: firewall, type: forwarding, name: forward_internal_nat64, find: { src: internal, dest: nat64 }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_nat64_wan, find: { src: nat64, dest: wan }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_backend_nat64, find: { src: backend, dest: nat64 }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_backend_wan, find: { src: backend, dest: wan }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_internal_infra, find: { src: internal, dest: infra }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_internal_backend, find: { src: internal, dest: backend }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_internal_iot, find: { src: internal, dest: iot }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_backend_iot, find: { src: backend, dest: iot }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_wan_dmz, find: { src: wan, dest: dmz }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_dmz_wan, find: { src: dmz, dest: wan }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_internal_dmz, find: { src: internal, dest: dmz }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_dmz_backend, find: { src: dmz, dest: backend }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_backend_dmz, find: { src: backend, dest: dmz }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_guest_nat64, find: { src: guest, dest: nat64 }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_guest_wan, find: { src: guest, dest: wan }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_internal_guest, find: { src: internal, dest: guest }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_dmz_nat64, find: { src: dmz, dest: nat64 }, value: {}}
+  - { config: firewall, type: forwarding, name: forward_iot_wan, find: { src: iot, dest: wan }, value: {}}
+
+  # Standard rules with topology-specific destinations and custom rules.
+  - config: firewall
+    type: rule
+    name: rule_ipsec_esp
+    find: { name: Allow-IPSec-ESP }
+    value: { dest: internal }
+    replace: false
+  - config: firewall
+    type: rule
+    name: rule_isakmp
+    find: { name: Allow-ISAKMP }
+    value: { dest: internal }
+    replace: false
+  - config: firewall
+    type: rule
+    name: rule_virtualhere
+    find: { name: Allow-VirtualHere }
+    value: { proto: [tcp], src: backend, dest: internal, dest_port: "7575 3240", target: ACCEPT }
+  - config: firewall
+    type: rule
+    name: rule_moonlight
+    find: { name: Allow-Moonlight }
+    value: { proto: [udp], src: backend, dest: internal, target: ACCEPT, src_port: 47998-48000 }
+  - config: firewall
+    type: rule
+    name: rule_vertibird
+    find: { name: Allow-Vertibird }
+    value: { proto: [tcp], src: nat64, dest: infra, dest_port: "80 443 8088 8006", target: ACCEPT }
+  - config: firewall
+    type: rule
+    name: rule_frigate_webrtc
+    find: { name: Allow-Frigate-WebRTC }
+    value:
+      src: wan
+      src_port: "8555"
+      dest: backend
+      dest_port: "8555"
+      target: ACCEPT
+      family: ipv6
+      dest_ip: ["0:0:0:3::22/-56"]
+      proto: [tcp, udp]
+  - config: firewall
+    type: rule
+    name: rule_hass
+    find: { name: Allow-Hass }
+    value:
+      proto: [tcp]
+      src: wan
+      dest: backend
+      dest_port: "80 443"
+      target: ACCEPT
+      family: ipv6
+      dest_ip: ["0:0:0:3::24/-56"]
+
+  # DNS-over-HTTPS resolvers.
+  - config: https-dns-proxy
+    type: https-dns-proxy
+    name: resolver_google_dns64
+    find: { resolver_url: "https://dns64.dns.google/dns-query" }
+    value:
+      bootstrap_dns: 2001:4860:4860::6464,2001:4860:4860::64
+      listen_addr: ::1
+      listen_port: "5054"
+      force_ipv6_resolvers: "1"
+  - config: https-dns-proxy
+    type: https-dns-proxy
+    name: resolver_cloudflare_dns64
+    find: { resolver_url: "https://dns64.cloudflare-dns.com/dns-query" }
+    value:
+      bootstrap_dns: 2606:4700:4700::64,2606:4700:4700::6400
+      listen_addr: ::1
+      listen_port: "5053"
+      force_ipv6_resolvers: "1"
+
+  # Cloudflare DDNS services. The shared API token is never logged. Hostnames come
+  # from group_vars/all/vars.yml (zone in vault); `domain` is cloudflare.com-v4's
+  # <host>@<zone> form.
+  - config: ddns
+    type: service
+    name: hass
+    find: { lookup_host: "{{ hass_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "hass-us@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_backend_device }}']['leases'][@.hostname='hass']['ipv6-addr'][0]['address']\""
+      interface: wan
+      force_ipversion: "1"
+      use_syslog: "2"
+      check_unit: minutes
+      force_unit: minutes
+      retry_unit: seconds
+  - config: ddns
+    type: service
+    name: dockerdmz
+    find: { lookup_host: "{{ nextcloud_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "nextcloud@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='nextcloud']['ipv6-addr'][0]['address']\""
+      interface: wan
+      use_syslog: "2"
+      check_unit: minutes
+      force_unit: minutes
+      retry_unit: seconds
+  - config: ddns
+    type: service
+    name: frigate_webrtc
+    find: { lookup_host: "{{ frigate_webrtc_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "frigate-webrtc.us@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='frigate-dmz']['ipv6-addr'][0]['address']\""
+      interface: wan
+      use_syslog: "2"
+  # Publishes the matrix LXC's current dmz GUA as matrix_hostname. AAAA
+  # only — federation is IPv6-only by decision (see roles/tenant/matrix/README.md), so
+  # unlike nextcloud there is no extern/ Fly.io IPv4 shim in front of it. The
+  # server_name is matrix_server_name (a separate zone, delegated here via a Cloudflare
+  # Redirect Rule on its apex); this is only where it is hosted.
+  # The lease for `matrix` is pinned in the same file (host_matrix above), so the
+  # ip_script resolves as soon as the container first boots.
+  - config: ddns
+    type: service
+    name: matrix
+    find: { lookup_host: "{{ matrix_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "matrix.us@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='matrix']['ipv6-addr'][0]['address']\""
+      interface: wan
+      use_syslog: "2"
+      check_unit: minutes
+      force_unit: minutes
+      retry_unit: seconds
+  - config: ddns
+    type: service
+    name: hermes
+    find: { lookup_host: "{{ hermes_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "hermes.us@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='hermes-gateway']['ipv6-addr'][0]['address']\""
+      interface: wan
+      use_syslog: "2"
+      check_unit: minutes
+      force_unit: minutes
+      retry_unit: seconds
+  # Route the CLAT EAM prefix to sentinel-lp specifically. Every other route6/
+  # ip6assign entry in this file derives a prefix for an interface the router
+  # itself terminates; this one is different — the prefix is pure Jool-internal
+  # translation bookkeeping on the Proxmox host's CLAT instance (roles/host/clat/),
+  # never assigned to any router-local interface, so no ip6assign/ip6hint stanza
+  # is needed here — just a static route to where it actually lives. Value chosen
+  # as fd5a:715f:1edc:a746::/64: hint '46' (464XLAT) against the router's own
+  # fd5a:715f:1edc:a700::/56 ULA delegation, following the same pattern that
+  # produced nat64's fd5a:715f:1edc:a764::/64 for hint '64'.
+  - config: network
+    type: route6
+    name: route_clat
+    find: { target: "fd5a:715f:1edc:a746::/64" }
+    value:
+      interface: backend
+      gateway: fd5a:715f:1edc:a703::10

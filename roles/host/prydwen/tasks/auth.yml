@@ -1,0 +1,27 @@
+---
+# No handlers here: dropbear reads authorized_keys and /etc/shadow on every login,
+# so neither change needs a service restart.
+- name: Ensure the Dropbear key directory exists
+  community.openwrt.file:
+    path: /etc/dropbear
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the managed router SSH keys
+  community.openwrt.copy:
+    dest: /etc/dropbear/authorized_keys
+    content: "{{ prydwen_ssh_authorized_keys | join('\n') ~ '\n' }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Set the vaulted root password hash
+  community.openwrt.lineinfile:
+    path: /etc/shadow
+    regex: "^root:[^:]*:(.*)$"
+    line: "root:{{ prydwen_root_password_hash }}:\\1"
+    backrefs: true
+    mode: "0600"
+  no_log: true

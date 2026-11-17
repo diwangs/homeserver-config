@@ -1,0 +1,93 @@
+---
+# Configuration playbook — safe to re-run any time. Everything here is mutable
+# desired-state: it reconciles LXC/VM resources (cores/memory/swap, mounts) onto the
+# live guests and (re)deploys the application layer. Immutable provisioning lives in
+# playbooks/init_proxmox.yml then playbooks/init_tenant.yml; run those first (see
+# init_proxmox.yml's header for the cold-start lease flow).
+
+- name: Reconcile guest resources on the Proxmox host
+  hosts: sentinel-lp
+  # See playbooks/init_proxmox.yml.
+  module_defaults:
+    group/community.proxmox.proxmox:
+      api_host: "{{ proxmox_host }}"
+      api_user: "{{ proxmox_user }}"
+      api_password: "{{ proxmox_password }}"
+      node: "{{ proxmox_host }}"
+      validate_certs: false
+  roles:
+    # Reconcile hd-idle spindown for disks with broken -S timers.
+    - role: hd_idle
+    # The CLAT (Jool SIIT) host infrastructure; creates vmbr2, which matrix's net7
+    # (reconciled by proxmox_lxc below) attaches to.
+    - role: clat
+  tasks:
+    - name: Reconcile LXC guests
+      ansible.builtin.import_role:
+        name: proxmox_lxc
+        tasks_from: reconcile.yml
+    - name: Reconcile Home Assistant resources
+      ansible.builtin.import_role:
+        name: hass
+        tasks_from: reconcile.yml
+
+- name: Configure NAS tenant
+  hosts: nas
+  roles:
+    - role: nas
+
+- name: Configure Omada tenant
+  hosts: omada
+  roles:
+    - role: omada
+
+- name: Configure Frigate tenant
+  hosts: frigate
+  roles:
+    - role: frigate
+
+- name: Configure Nextcloud tenant
+  hosts: nextcloud
+  roles:
+    - role: nextcloud
+
+- name: Configure seedbox tenant
+  hosts: seedbox
+  roles:
+    - role: seedbox
+
+- name: Configure Immich tenant
+  hosts: immich
+  roles:
+    - role: immich
+
+- name: Configure Matrix tenant
+  hosts: matrix
+  roles:
+    - role: matrix
+
+- name: Configure Hermes tenant
+  hosts: hermes
+  roles:
+    - role: hermes
+
+- name: Configure Hermes gateway tenant
+  hosts: hermes-gateway
+  roles:
+    - role: hermes_gateway
+
+- name: Baseline for the Debian guests
+  hosts: tenant_lxc:!lxc_nixos
+  roles:
+    # No inbound SSH: managed with `pct exec` (group_vars/tenant_lxc.yml).
+    - role: disable_ssh
+    # Bounded journal (the NixOS guests keep journald's 10%-of-disk default).
+    - role: journald
+
+- name: Configure the prydwen OpenWrt router
+  hosts: prydwen
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: community.openwrt.init
+    - role: prydwen

@@ -1,0 +1,9 @@
+---
+- name: Install Jool and prerequisite kernel headers
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Provision the container-facing CLAT bridge
+  ansible.builtin.import_tasks: bridge.yml
+
+- name: Set up the CLAT network namespace and jool_siit instance
+  ansible.builtin.import_tasks: netns.yml

@@ -1,0 +1,91 @@
+---
+# Apply committed UCI changes the way LuCI's "Save & Apply" does: send procd a
+# config.change event for each changed config package. procd then reloads only the
+# services that registered a reload trigger for that package (dnsmasq/odhcpd for
+# dhcp, fw4 for firewall, netifd for network, ...), and netifd reconfigures only the
+# interfaces whose settings changed. Nothing is restarted wholesale.
+#
+# The events are sent directly rather than via /sbin/reload_config, because that
+# diffs against a checksum baseline in /var/run/config.md5 which only it maintains:
+# it would also fire for unrelated edits since the last apply, and nothing at all
+# when no baseline exists yet.
+#
+# Handlers run in the order defined here. Bootstrap/finalize runs
+# (playbooks/init_openwrt.yml) restart services explicitly in tasks/services.yml.
+
+- name: Collect the UCI packages changed by this run
+  ansible.builtin.set_fact:
+    prydwen_uci_changed_packages: >-
+      {{ (
+        (prydwen_uci_absent_sections_result.results | default([]) | selectattr('changed')
+          | map(attribute='item.config') | list)
+        + (prydwen_uci_absent_options_result.results | default([]) | selectattr('changed')
+          | map(attribute='item') | map('split', '.') | map('first') | list)
+        + (prydwen_uci_values_result.results | default([]) | selectattr('changed')
+          | map(attribute='item.key') | map('split', '.') | map('first') | list)
+        + (prydwen_uci_sections_result.results | default([]) | selectattr('changed')
+          | map(attribute='item.config') | list)
+      ) | unique | list }}
+  when: not prydwen_bootstrap_mode | bool
+  listen: Apply prydwen UCI changes
+
+# `network` goes last: it is the only reload that can briefly touch the management
+# path, so everything else is already queued by then.
+- name: Signal procd that a UCI package changed
+  ansible.builtin.raw: >-
+    ubus call service event
+    {{ {'type': 'config.change', 'data': {'package': item}} | to_json | quote }}
+  loop: >-
+    {{ prydwen_uci_changed_packages | reject('equalto', 'network') | list
+       + (['network'] if 'network' in prydwen_uci_changed_packages else []) }}
+  changed_when: true
+  when: not prydwen_bootstrap_mode | bool
+  listen: Apply prydwen UCI changes
+
+- name: Wait for prydwen after reloading networking
+  community.openwrt.wait_for_connection:
+    delay: 3
+    timeout: 300
+  # Use bounded independent SSH attempts in case netifd re-applies the management
+  # interface.
+  vars:
+    ansible_ssh_args: >-
+      -F /dev/null
+      -o IdentitiesOnly=yes
+      -o UserKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=no
+      -o ControlMaster=no
+      -o ConnectTimeout=5
+      -o ServerAliveInterval=5
+      -o ServerAliveCountMax=2
+  when:
+    - not prydwen_bootstrap_mode | bool
+    - not ansible_check_mode
+    - "'network' in prydwen_uci_changed_packages"
+  listen: Apply prydwen UCI changes
+
+# tor's init script registers no reload trigger, so a tor or tor-hs (hidden service)
+# config change needs an explicit restart.
+- name: Restart tor after its configuration changed
+  community.openwrt.service:
+    name: tor
+    state: restarted
+  when:
+    - not prydwen_bootstrap_mode | bool
+    - prydwen_uci_changed_packages | intersect(['tor', 'tor-hs']) | length > 0
+  listen: Apply prydwen UCI changes
+
+# setupjool.sh is idempotent: it deletes and recreates the namespace.
+- name: Re-run the Jool NAT64 namespace setup
+  community.openwrt.command:
+    cmd: /etc/jool/setupjool.sh
+  changed_when: true
+  when: not prydwen_bootstrap_mode | bool
+  listen: Reconfigure prydwen Jool
+
+- name: Restart direct CAKE queues for inter-VLAN traffic
+  community.openwrt.service:
+    name: lan-qos
+    state: restarted
+  when: not prydwen_bootstrap_mode | bool
+  listen: Reconcile prydwen LAN QoS

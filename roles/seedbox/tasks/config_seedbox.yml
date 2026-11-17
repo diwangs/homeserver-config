@@ -1,5 +1,0 @@
----
-# Mutable in-tenant config: the torrent SMB mount. Re-runnable; driven by
-# configure.yml.
-- name: Set up storage
-  ansible.builtin.include_tasks: config_setup_storage.yml

@@ -1,0 +1,33 @@
+---
+- name: Configure the Docker daemon (IPv6 bridges, log rotation)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+
+# Unconditional, as before: picks up a daemon.json change on every run.
+- name: Restart Docker after daemon.json change
+  ansible.builtin.service:
+    name: docker
+    state: restarted
+
+- name: Create Docker bridge network {{ docker_host_bridge_network.name | default('') }}
+  community.docker.docker_network:
+    name: "{{ docker_host_bridge_network.name }}"
+    enable_ipv6: true
+    driver: bridge
+    ipam_config:
+      - subnet: "{{ docker_host_bridge_network.subnet }}"
+  when: docker_host_bridge_network | length > 0
+
+- name: Create Docker ipvlan network {{ docker_host_ipvlan_network.name }}
+  community.docker.docker_network:
+    name: "{{ docker_host_ipvlan_network.name }}"
+    enable_ipv6: true
+    driver: ipvlan
+    driver_options:
+      parent: "{{ docker_host_ipvlan_network.parent }}"
+    ipam_config:
+      - subnet: "{{ docker_host_ipvlan_network.subnet }}"
+        gateway: "{{ docker_host_ipvlan_network.gateway }}"
+        iprange: "{{ docker_host_ipvlan_network.iprange }}"

@@ -1,0 +1,37 @@
+---
+# Provisioning, stage 2 of 2 — runs inside each tenant (via `pct exec` through the
+# Proxmox host, see group_vars/tenant_lxc.yml). Lays down the immutable in-guest platform:
+# third-party apt repos, base runtimes (Docker engine, MongoDB, qbittorrent) and the
+# Docker ipvlan network fabric.
+#
+# WARNING: run this only after playbooks/init_proxmox.yml has created the guests AND
+# a static DHCPv6 lease has been set up manually for each tenant. Ansible reaches a
+# guest without it, but apt and docker would have no internet egress. The lease step
+# can't be automated: the DUID can't be set statically from outside, so the router
+# can't recognise a guest to assign it a deterministic IP beforehand. (A static IP
+# breaks internet egress under a rotating prefix; DHCPv4 would need an insecure
+# nat64 to the backend subnet. See git history for the full rationale.)
+#
+# nas and hass have no in-tenant provisioning step; the NixOS guests carry theirs in
+# their image.
+
+- name: Provision Omada tenant
+  hosts: omada
+  tasks:
+    - name: Provision Omada platform
+      ansible.builtin.import_role:
+        name: omada
+        tasks_from: install.yml
+
+- name: Provision Docker tenants
+  hosts: lxc_docker
+  roles:
+    - role: docker_host
+
+- name: Provision seedbox tenant
+  hosts: seedbox
+  tasks:
+    - name: Provision seedbox platform
+      ansible.builtin.import_role:
+        name: seedbox
+        tasks_from: install.yml

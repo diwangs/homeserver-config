@@ -1,0 +1,25 @@
+---
+# Debian guests: no inbound SSH. Ansible manages them through the Proxmox host with
+# `pct exec` (group_vars/tenant_lxc.yml), and an operator gets a root shell with
+# `pct enter <vmid>` on sentinel-lp, so the only machines that need to trust an SSH
+# key are sentinel-lp and prydwen. (NixOS guests do the same declaratively:
+# services.openssh.enable = false in their configuration.nix.)
+- name: Remove the managed root SSH keys
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ item }}"
+    state: absent
+  loop: "{{ managed_authorized_keys }}"
+  loop_control:
+    label: "{{ item.split(' ') | last }}"
+
+# Both units: Debian ships ssh.service enabled and ssh.socket disabled, and either
+# would accept connections.
+- name: Stop and disable sshd
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - ssh.socket
+    - ssh.service

@@ -1,8 +1,18 @@
 ---
 proxmox_host: sentinel-lp
 proxmox_user: root@pam
-ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIz6uuEDziEcwZFjwNr9+d7st1eRQJ0FtYBlgdk4bPhG openpgp:0x5D25EFFE"
-subnet: fd5a:715f:1edc:a703::1/64
+ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN8rN7/MkdOAlx+eovs/7wxAN1Lb9PnaeLESTAm0EB55"
+
+# Automation identity Ansible authenticates with (private half at
+# .ssh/sentinel-lp-ansible, gitignored). Kept distinct from ssh_pubkey so an
+# operator key can be rotated without locking automation out, and vice versa.
+automation_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8V5bwGpRdrqIEbA+yS4wsF1I4t8EKUARw8EvXJT4de ansible-automation@sentinel-lp"
+
+# Every key permitted to log in as root over SSH (prydwen; sentinel-lp by hand).
+# The LXC guests accept none: roles/common/disable_ssh removes these from them.
+managed_authorized_keys:
+  - "{{ ssh_pubkey }}"
+  - "{{ automation_pubkey }}"
 
 # Debian release that third-party APT repos are pinned to. Defaults to the
 # release currently running on the tenant, so fresh provisioning is correct on
@@ -15,3 +25,15 @@ debian_release_major: # for openSUSE-style "Debian_NN" repo paths
 
 # Secret indirection — actual value lives in the encrypted vault.yml
 proxmox_password: "{{ vault_proxmox_password }}"
+
+# Public identity — real values live in the encrypted vault.yml so the repo can be
+# published without naming its owner. Every public hostname derives from these.
+public_domain: "{{ vault_public_domain }}"
+matrix_server_name: "{{ vault_matrix_server_name }}" # Matrix identity suffix, NOT where it is hosted
+acme_email: "{{ vault_acme_email }}"
+hermes_matrix_allowed_users: "{{ vault_hermes_matrix_allowed_users }}" # rendered into the hermes site.nix
+hass_hostname: "hass-us.{{ public_domain }}"
+nextcloud_hostname: "nextcloud.{{ public_domain }}"
+frigate_webrtc_hostname: "frigate-webrtc.us.{{ public_domain }}"
+matrix_hostname: "matrix.us.{{ public_domain }}"
+hermes_hostname: "hermes.us.{{ public_domain }}"

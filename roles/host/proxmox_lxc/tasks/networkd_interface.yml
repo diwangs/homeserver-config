@@ -1,0 +1,14 @@
+---
+- name: Deploy systemd-networkd config for {{ proxmox_lxc_cfg.hostname ~ ':' ~ proxmox_lxc_iface }}
+  ansible.builtin.command:
+    cmd: >
+      pct exec {{ proxmox_lxc_cfg.vmid }} -- sh -c
+      'n="[Match]\nName={{ proxmox_lxc_iface }}\n\n[Network]\nDHCP=ipv6\nIPv6AcceptRA=yes\n";
+      printf "$n" | cmp -s - /etc/systemd/network/{{ proxmox_lxc_iface }}.network ||
+      { printf "$n" > /etc/systemd/network/{{ proxmox_lxc_iface }}.network; echo changed; }'
+  register: proxmox_lxc_networkd_file
+  changed_when: "'changed' in proxmox_lxc_networkd_file.stdout"
+
+- name: Track networkd config changes
+  ansible.builtin.set_fact:
+    proxmox_lxc_networkd_changed: "{{ proxmox_lxc_networkd_changed or proxmox_lxc_networkd_file is changed }}"

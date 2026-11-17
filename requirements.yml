@@ -1,6 +1,15 @@
 ---
 collections:
+  # Pinned to the last 1.x: community.proxmox 2.0.0 (bundled in ansible 14) has
+  # three regressions against this repo — requires proxmoxer >= 2.3 (Debian 13 APT
+  # only ships 2.2), flips validate_certs to default True (PVE's self-signed cert
+  # can't verify), and sends an invalid cmode=default on LXC create. 1.6.0 predates
+  # all three. Install with: ansible-galaxy collection install -r requirements.yml
   - name: community.proxmox
+    version: "1.6.0"
+  # Shell-based OpenWrt modules, including APK support for OpenWrt 25.12+.
+  - name: community.openwrt
+    version: "1.6.0"
 
 roles:
   - name: geerlingguy.hdparm

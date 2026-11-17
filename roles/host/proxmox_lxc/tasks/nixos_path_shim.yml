@@ -1,0 +1,19 @@
+---
+# `pct exec` runs commands with PATH=/sbin:/bin:/usr/sbin:/usr/bin. On NixOS those
+# hold only /bin/sh and /usr/bin/env, so Ansible's own plumbing over the
+# proxmox_pct_remote connection (mkdir, cat, ...) and in-guest commands such as
+# nixos-rebuild would not be found. /usr/sbin does not otherwise exist on NixOS,
+# so point it at the system profile. Lives on the persistent rootfs; NixOS
+# activation never touches it.
+- name: Expose the NixOS system profile on the pct exec PATH of {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.command:
+    cmd: >-
+      pct exec {{ proxmox_lxc_cfg.vmid }} -- /bin/sh -c
+      '[ "$(/run/current-system/sw/bin/readlink /usr/sbin)" = /run/current-system/sw/bin ] ||
+      { /run/current-system/sw/bin/ln -sfn /run/current-system/sw/bin /usr/sbin && echo changed; }'
+  register: proxmox_lxc_path_shim
+  changed_when: "'changed' in proxmox_lxc_path_shim.stdout"
+  # Right after `pct start` the guest may still be activating /run/current-system.
+  retries: 10
+  delay: 3
+  until: proxmox_lxc_path_shim.rc == 0

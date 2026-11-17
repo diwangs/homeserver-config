@@ -1,0 +1,76 @@
+---
+# First-run provisioning for an already-installed OpenWrt 25.12.x router.
+# Example:
+#   ansible-playbook playbooks/init_openwrt.yml -e openwrt_bootstrap_host=192.168.1.1
+
+- name: Register the factory-address router
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require the factory management address
+      ansible.builtin.assert:
+        that:
+          - openwrt_bootstrap_host is defined
+          - openwrt_bootstrap_host | length > 0
+        fail_msg: >-
+          Pass the reachable factory address with
+          -e openwrt_bootstrap_host=<address>.
+
+    - name: Add the bootstrap connection without changing final inventory
+      ansible.builtin.add_host:
+        name: prydwen-bootstrap
+        groups: openwrt_bootstrap
+        ansible_host: "{{ openwrt_bootstrap_host }}"
+        ansible_user: "{{ openwrt_bootstrap_user | default('root') }}"
+        ansible_connection: ssh
+        prydwen_bootstrap_mode: true
+        prydwen_final_inventory_host: prydwen
+
+- name: Stage prydwen configuration from the factory address
+  hosts: openwrt_bootstrap
+  gather_facts: false
+  serial: 1
+  vars:
+    # Dynamic inventory hosts do not automatically inherit host_vars/prydwen.yml.
+    prydwen_config_host: "{{ hostvars[prydwen_final_inventory_host] }}"
+  pre_tasks:
+    - name: Import final-host prydwen variables for bootstrap
+      ansible.builtin.set_fact:
+        prydwen_cloudflare_api_token: "{{ prydwen_config_host.prydwen_cloudflare_api_token }}"
+        prydwen_root_password_hash: "{{ prydwen_config_host.prydwen_root_password_hash }}"
+        prydwen_packages: "{{ prydwen_config_host.prydwen_packages }}"
+        prydwen_physical_devices: "{{ prydwen_config_host.prydwen_physical_devices }}"
+        prydwen_uci_sections: "{{ prydwen_config_host.prydwen_uci_sections }}"
+        prydwen_uci_values: "{{ prydwen_config_host.prydwen_uci_values }}"
+        prydwen_uci_absent_sections: "{{ prydwen_config_host.prydwen_uci_absent_sections }}"
+        prydwen_uci_absent_options: "{{ prydwen_config_host.prydwen_uci_absent_options }}"
+        prydwen_stale_files: "{{ prydwen_config_host.prydwen_stale_files }}"
+        prydwen_services: "{{ prydwen_config_host.prydwen_services }}"
+        prydwen_jool: "{{ prydwen_config_host.prydwen_jool }}"
+        prydwen_ssh_authorized_keys: "{{ prydwen_config_host.prydwen_ssh_authorized_keys }}"
+      no_log: true
+  roles:
+    - role: community.openwrt.init
+    - role: prydwen
+  post_tasks:
+    - name: Restart networking after returning the bootstrap response
+      community.openwrt.nohup:
+        command: /etc/init.d/network restart
+        delay: 3
+      when: not ansible_check_mode
+
+- name: Finish provisioning at the final management address
+  hosts: prydwen
+  gather_facts: false
+  serial: 1
+  vars:
+    prydwen_finalize_mode: true
+  pre_tasks:
+    - name: Wait for the final OpenWrt management address
+      community.openwrt.wait_for_connection:
+        delay: 5
+        timeout: 300
+      when: not ansible_check_mode
+  roles:
+    - role: community.openwrt.init
+    - role: prydwen

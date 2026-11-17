@@ -9,8 +9,63 @@ It has the following hardware:
 
 ## Ansible prerequisites
 - SSH
+  - Ansible authenticates with a dedicated automation key, `.ssh/sentinel-lp-ansible`
+    (wired up via `private_key_file` in `ansible.cfg`), rather than an operator's
+    personal key. The private half is gitignored; the public half is tracked at
+    `.ssh/sentinel-lp-ansible.pub` and mirrored into `automation_pubkey` in
+    `group_vars/all/vars.yml`.
+  - Only `sentinel-lp` and `prydwen` accept SSH. The LXC guests run no sshd at all:
+    Ansible reaches them through `sentinel-lp` with `pct exec`
+    (`community.proxmox.proxmox_pct_remote`, see `group_vars/tenant_lxc.yml`), and a root
+    shell is `pct enter <vmid>` on the host.
+  - `managed_authorized_keys` (operator key + automation key) is reconciled onto
+    prydwen every run by the `prydwen` role.
+  - Bootstrapping: append the public key to `/root/.ssh/authorized_keys` on
+    `sentinel-lp` by hand.
+  - Rotating: regenerate the keypair, update `automation_pubkey`, re-copy it to
+    `sentinel-lp`, then run `playbooks/configure.yml --limit prydwen`.
 - Install `python3-proxmoxer`
 - `frontpanel-pool` ZFS pool imported (not necessarily unlocked and mounted)
+- Collections and roles: `ansible-galaxy install -r requirements.yml`
+
+## Layout
+```
+ansible.cfg              inventory, roles_path, vault + automation key
+inventory                groups: host, tenant_lxc (order matters), lxc_docker, lxc_nixos
+group_vars/, host_vars/  per-group / per-host data; each guest's LXC definition is
+                         `proxmox_lxc` in host_vars/<guest>.yml
+site.yml                 imports the three stages below (tags: init_proxmox, init_tenant, configure)
+playbooks/
+  init_proxmox.yml       stage 1: host setup + create guests (host/proxmox_lxc, tenant/hass)
+  init_tenant.yml        stage 2: immutable in-guest platform (docker_host, apt repos)
+  configure.yml          reconcile resources/mounts + deploy apps; safe to re-run any time
+  init_openwrt.yml       first-run provisioning of the prydwen router
+  upgrade_lxc_dist.yml   in-place Debian major upgrade of one tenant
+  migrate_hermes.yml     one-off: split the Matrix gateway out of hermes into CT108
+roles/
+  host/                 physical host, router, and guest provisioning
+    proxmox_lxc, proxmox_templates, zfs, hd_idle, clat, prydwen,
+    usbip, powertop      (usbip and powertop are not currently applied)
+  common/               shared in-guest building blocks
+    docker_host, portainer, cifs_mount, journald, disable_ssh
+  tenant/               one role per tenant service
+    hass, nas, omada, frigate, nextcloud, seedbox, immich, matrix, hermes, hermes_gateway
+  maintenance/
+    debian_dist_upgrade used by playbooks/upgrade_lxc_dist.yml
+docs/network.md          network design notes
+extern/                  non-Ansible deployments (Fly.io IPv4 proxy)
+```
+The four role directories are listed explicitly in `ansible.cfg`; playbooks use
+short role names such as `proxmox_lxc` and `frigate`.
+The `host` inventory group contains `sentinel-lp` and `prydwen`; platform-specific
+plays target each host directly. Guests belong to `tenant_lxc`, with their
+connection settings in `group_vars/tenant_lxc.yml`.
+Home Assistant is a KVM tenant: `roles/tenant/hass` runs on `sentinel-lp` to
+create its VM and reconcile resources, with no in-guest Ansible tasks.
+
+Day to day: `ansible-playbook playbooks/configure.yml` (optionally `--limit <host>`).
+Cold start: `playbooks/init_proxmox.yml` → set the DHCPv6 leases →
+`playbooks/init_tenant.yml` → `playbooks/configure.yml` (see the playbook headers).
 
 ## Disk Configuration
 - SSD is using ext4 and used for VM disks and such.
@@ -35,7 +90,7 @@ It has the following hardware:
 
 ## Power-Saving Measures
 - Install `powertop`
-- `powertop --auto-tune`
+- `powertop --auto-tune` (`roles/host/powertop`, not applied by any playbook yet)
 
 # Services
 ## NAS

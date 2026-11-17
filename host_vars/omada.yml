@@ -1,7 +1,26 @@
 ---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 101
+  hostname: omada
+  # TODO: make sure the template exist first?
+  template: debian12
+  disk: local-lvm:8 # 8 GB
+  cores: 1
+  memory: 2048 # 2 GB
+  swap: 2048
+  netif:
+    # net0: backend, DHCPv6
+    net0: "name=eth0,bridge=vmbr1,tag=3,firewall=1,ip6=dhcp"
+    # net1: infra, DHCPv4 (for connecting with child switches)
+    # This doesn't need gateway because we only need to connect to link-local devices
+    net1: "name=eth1,bridge=vmbr1,tag=1,firewall=1,ip=dhcp"
+  features:
+    - nesting=1 # Newer Systemd requires namespacing
+
 omada_url: https://static.tp-link.com/upload/software/2026/202601/20260121/Omada_Network_Application_v6.1.0.19_linux_x64_20260117100106.deb
 
 # Third-party repo task re-laid (with the target codename) by the dist-upgrade
-# playbook — see tasks/debian_dist_upgrade.yml.
+# playbook — see roles/maintenance/debian_dist_upgrade.
 tenant_repo_role: omada
-tenant_repo_tasks: init_mongodb_repo.yml
+tenant_repo_tasks: mongodb_repo.yml

@@ -1,0 +1,31 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 108
+  hostname: hermes-gateway
+  # Built on CT107 (hermes) from the shared roles/tenant/hermes/files/nixos flake by
+  # roles/tenant/hermes_gateway/tasks/build_template.yml, so hermes must exist first.
+  template: nixos
+  template_role: hermes_gateway
+  ostype: nixos
+  nixos_path_shim: true
+  disk: local-lvm:64
+  cores: 2
+  # Builds run on CT107; this is a runtime limit, not a build budget.
+  memory: 2048
+  swap: 2048
+  netif:
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual,hwaddr=BC:24:11:6C:29:01"
+  unprivileged: true
+  features:
+    - nesting=1
+  # No idmap: the directory is owned by the unmapped container uid 1000 instead.
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Backup/hermes-gateway
+      owner: "101000"
+      group: "101000"
+      mode: "0770"
+  config_lines:
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Backup/hermes-gateway,mp=/mnt/hermes-gateway-backup
+      at_create: true

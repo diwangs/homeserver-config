@@ -1,0 +1,17 @@
+---
+# Ansible reaches every LXC guest through the Proxmox host instead of over SSH:
+# community.proxmox.proxmox_pct_remote opens a Paramiko SSH session to sentinel-lp
+# (with the automation key, as root) and runs each command as
+# `pct exec <vmid> -- ...`. So only sentinel-lp (and prydwen) need to trust an SSH
+# key; the guests run no sshd at all (roles/common/disable_ssh, and services.openssh in the
+# NixOS configurations).
+#
+# It also removes the old bootstrap catch-22: a guest is manageable as soon as it
+# is running, before it has an address. (It still needs its DHCPv6 lease for
+# internet egress — apt, docker pulls, nix substituters.)
+ansible_connection: community.proxmox.proxmox_pct_remote
+# The SSH endpoint is the Proxmox host. ansible_host keeps the guest's own address,
+# which other roles read (e.g. cifs_mount_server); the plugin prefers
+# ansible_paramiko_host over ansible_host for where to connect.
+ansible_paramiko_host: "{{ hostvars['sentinel-lp'].ansible_host }}"
+proxmox_vmid: "{{ proxmox_lxc.vmid }}"

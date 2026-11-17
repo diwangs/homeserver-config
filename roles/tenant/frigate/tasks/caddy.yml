@@ -1,0 +1,30 @@
+---
+- name: Create caddy config file
+  ansible.builtin.copy:
+    dest: /etc/caddy/Caddyfile
+    mode: "0644"
+    content: |
+      # IPv6 -> IPv4 front for Frigate's unauthenticated web UI. Frigate now binds
+      # 5000 on IPv4 loopback only (see config_frigate.yml), so Caddy listens on the
+      # backend (VLAN 3) ULA over IPv6 and proxies to it. The http:// prefix keeps
+      # the listener plaintext. The host in the site address is only a request
+      # matcher — Caddy still binds every interface unless told otherwise, which
+      # would grab 0.0.0.0:5000 and collide with Frigate's 127.0.0.1:5000 publish.
+      # `bind` pins the listener to the ULA so loopback:5000 stays free for Frigate.
+      http://[fd5a:715f:1edc:a703::22]:5000 {
+        bind fd5a:715f:1edc:a703::22
+        reverse_proxy 127.0.0.1:5000
+      }
+  notify: Restart caddy
+
+- name: Install and start caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+
+# Apply a Caddyfile change now, before frigate.yml creates the container —
+# otherwise the stale Caddy still holds 0.0.0.0:5000 and the publish of
+# 127.0.0.1:5000 fails with "address already in use".
+- name: Apply Caddy config before Frigate binds loopback:5000
+  ansible.builtin.meta: flush_handlers

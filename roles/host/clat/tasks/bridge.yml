@@ -1,0 +1,48 @@
+---
+# First Ansible-managed change to sentinel-lp's own network config. vmbr0/vmbr1
+# were provisioned out-of-band (PVE installer + manual VLAN config) — nothing else
+# in this repo touches host networking. PVE does not read /etc/network/interfaces.d
+# drop-ins (confirmed: the GUI itself stages into /etc/network/interfaces.new and
+# will not pick up sourced files), so this goes through PVE's own network API —
+# the same staged-write-then-apply flow the GUI uses — rather than hand-editing the
+# PVE-managed interfaces file directly.
+- name: Check the Proxmox host's current network configuration
+  ansible.builtin.command: pvesh get /nodes/{{ proxmox_host }}/network --output-format json
+  register: clat_pve_network
+  changed_when: false
+  check_mode: false # read-only; without this, --check skips it and leaves
+  # clat_pve_network.stdout empty, breaking the from_json below
+
+# No --cidr: this bridge carries no address of its own in the main namespace. The
+# gateway containers actually use (clat_gateway_ipv4) lives inside the CLAT netns,
+# on its LAN-facing veth end (see templates/setupclat.sh.j2) — vmbr2 here is a bare
+# L2 relay between containers' netifs and that veth, nothing more.
+- name: Create the CLAT bridge
+  ansible.builtin.command: >-
+    pvesh create /nodes/{{ proxmox_host }}/network
+    --type bridge --iface {{ clat_bridge.name }}
+    --autostart 1
+  when: clat_bridge.name not in (clat_pve_network.stdout | from_json | map(attribute='iface') | list)
+  changed_when: true # Only runs when the bridge is absent.
+  notify: Apply the staged Proxmox network configuration
+
+# The bridge must exist before the later guest reconciliation attaches NICs.
+- name: Apply pending bridge changes before configuring guests
+  ansible.builtin.meta: flush_handlers
+
+# Proxmox never needed host-wide IP forwarding before now — guest traffic is
+# bridged at L2 straight to the router, which does the actual routing. Confirmed
+# both sysctls read 0 on this host prior to CLAT. The WAN-facing veth pair (see
+# templates/setupclat.sh.j2) relies on the main namespace forwarding translated
+# packets on toward its own existing default route; without this they'd be
+# silently dropped rather than forwarded.
+- name: Enable persistent IPv4/IPv6 forwarding on the host
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - net.ipv4.conf.all.forwarding
+    - net.ipv6.conf.all.forwarding

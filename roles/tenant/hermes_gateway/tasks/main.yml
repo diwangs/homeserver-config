@@ -1,0 +1,82 @@
+---
+# Reconcile the running Hermes Matrix gateway (CT108). Runs in-guest through the
+# Proxmox host (`pct exec`, see group_vars/tenant_lxc.yml) from playbooks/configure.yml; the
+# flake tree is shared with roles/tenant/hermes.
+- name: Ensure gateway state directory exists
+  ansible.builtin.file:
+    path: /var/lib/hermes
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "2770"
+
+- name: Install Matrix and proxy credentials
+  ansible.builtin.template:
+    src: secrets.env.j2
+    dest: /var/lib/hermes/secrets.env
+    owner: hermes
+    group: hermes
+    mode: "0400"
+  register: hermes_gateway_secrets
+  no_log: true
+
+- name: Ensure gateway NixOS configuration directory exists
+  ansible.builtin.file:
+    path: /etc/nixos
+    state: directory
+    mode: "0755"
+
+- name: Deploy the shared NixOS flake tree
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../hermes/files/nixos/"
+    dest: /etc/nixos/
+    owner: root
+    group: root
+    mode: "0644"
+
+# site.nix carries the public identity (domains, Matrix IDs, ACME contact) from
+# the vault; it is not committed, so it is rendered beside the static tree.
+- name: Render the public identity module
+  ansible.builtin.template:
+    src: "{{ role_path }}/../hermes/templates/site.nix.j2"
+    dest: /etc/nixos/site.nix
+    owner: root
+    group: root
+    mode: "0644"
+
+# keys.nix (root authorized keys) was retired with inbound SSH; the flake no longer
+# imports it, so drop the stale copy from older deployments.
+- name: Remove the retired authorized-keys module
+  ansible.builtin.file:
+    path: /etc/nixos/keys.nix
+    state: absent
+
+# Built in-guest, like matrix and hermes. The guest has 2 GiB RAM + 2 GiB swap, so
+# a rebuild that has to compile (rather than substitute) is slow; the gateway
+# closure is small and mostly shared with CT107's, which is why it used to be built
+# there over SSH.
+# --no-update-lock-file: the committed flake.lock is the pin.
+- name: Apply the gateway NixOS configuration
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      before=$(readlink -f /run/current-system)
+      nixos-rebuild switch --flake /etc/nixos#hermes-gateway --no-update-lock-file
+      after=$(readlink -f /run/current-system)
+      [ "$before" = "$after" ] || echo CHANGED
+    executable: /bin/sh
+  register: hermes_gateway_rebuild
+  changed_when: "'CHANGED' in hermes_gateway_rebuild.stdout"
+
+- name: Check whether Matrix cutover has completed
+  ansible.builtin.stat:
+    path: /var/lib/hermes/matrix-cutover-ready
+  register: hermes_gateway_cutover_marker
+
+- name: Restart gateway after configuration or credential changes
+  ansible.builtin.systemd_service:
+    name: hermes-agent
+    state: restarted
+  when:
+    - hermes_gateway_cutover_marker.stat.exists
+    - hermes_gateway_secrets is changed or hermes_gateway_rebuild is changed

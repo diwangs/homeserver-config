@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+
+START=21
+STOP=89
+
+apply_device() {
+	local device="$1"
+
+	ip link show dev "$device" >/dev/null 2>&1 || return 0
+
+	# Remove qosify's eBPF classifiers during an in-place migration.
+	tc filter del dev "$device" ingress pref 272 2>/dev/null || true
+	tc filter del dev "$device" egress pref 272 2>/dev/null || true
+
+	tc qdisc replace dev "$device" root cake \
+		unlimited diffserv4 flows nonat nowash
+}
+
+start() {
+{% for device in prydwen_lan_qos_devices %}
+	apply_device '{{ device }}'
+{% endfor %}
+}
+
+reload() {
+	start
+}
+
+stop() {
+{% for device in prydwen_lan_qos_devices %}
+	tc qdisc del dev '{{ device }}' root 2>/dev/null || true
+{% endfor %}
+}

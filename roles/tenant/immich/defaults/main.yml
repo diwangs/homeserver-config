@@ -1,0 +1,6 @@
+---
+# Pinned release: Immich ships breaking changes, so never use `release`/`latest`.
+# Upgrade procedure: check the release notes (the DB image occasionally bumps in
+# lockstep — compare docker/docker-compose.yml at the new tag), bump this, and
+# rerun playbooks/configure.yml.
+immich_version: v3.4.0

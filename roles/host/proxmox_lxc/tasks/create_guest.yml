@@ -1,0 +1,94 @@
+---
+- name: Build and upload the NixOS template for {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_role:
+    name: "{{ proxmox_lxc_cfg.template_role }}"
+    tasks_from: build_template.yml
+  when: proxmox_lxc_cfg.template == 'nixos'
+
+# proxmox_templates_debian13 is registered by roles/host/proxmox_templates earlier in the play.
+- name: Resolve the OS template for {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.set_fact:
+    proxmox_lxc_ostemplate: >-
+      local:vztmpl/{{ proxmox_lxc_built_template if proxmox_lxc_cfg.template == 'nixos'
+      else proxmox_templates_debian13.stdout if proxmox_lxc_cfg.template == 'debian13'
+      else proxmox_lxc_debian12_template }}
+
+- name: Create LXC container {{ proxmox_lxc_cfg.hostname }}
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    vmid: "{{ proxmox_lxc_cfg.vmid }}"
+    hostname: "{{ proxmox_lxc_cfg.hostname }}"
+    # Root password, for the Proxmox console (`pct enter` needs none). No pubkey:
+    # guests run no sshd and are managed with `pct exec` (group_vars/tenant_lxc.yml).
+    password: "{{ proxmox_password }}" # Same for now
+    ostemplate: "{{ proxmox_lxc_ostemplate }}"
+    ostype: "{{ proxmox_lxc_cfg.ostype | default(omit) }}"
+    disk: "{{ proxmox_lxc_cfg.disk }}"
+    cores: "{{ proxmox_lxc_cfg.cores }}"
+    memory: "{{ proxmox_lxc_cfg.memory }}"
+    swap: "{{ proxmox_lxc_cfg.swap }}"
+    netif: "{{ proxmox_lxc_cfg.netif }}"
+    unprivileged: "{{ proxmox_lxc_cfg.unprivileged | default(omit) }}"
+    features: "{{ proxmox_lxc_cfg.features }}"
+    onboot: true
+    startup: "{{ proxmox_lxc_cfg.startup | default(omit) }}"
+    state: present
+
+# Created here rather than left to the bind mount, which would otherwise land
+# root-owned and unwritable by the service.
+- name: Ensure host directories exist for {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ proxmox_lxc_cfg.host_dirs | default([]) }}"
+
+- name: Pass through the mapped user for {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_tasks: idmap.yml
+  when: proxmox_lxc_cfg.idmap is defined
+
+- name: Add raw LXC config lines to {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/{{ proxmox_lxc_cfg.vmid }}.conf
+    regexp: "^{{ item | regex_escape }}$"
+    line: "{{ item }}"
+    state: present
+  loop: "{{ proxmox_lxc_cfg.raw_lines | default([]) }}"
+
+- name: Add creation-time config lines to {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/{{ proxmox_lxc_cfg.vmid }}.conf
+    regexp: "^{{ item.key }}:"
+    line: "{{ item.key }}: {{ item.value }}"
+    state: present
+  loop: "{{ proxmox_lxc_cfg.config_lines | default([]) | selectattr('at_create', 'defined') | selectattr('at_create') }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Start LXC container {{ proxmox_lxc_cfg.hostname }}
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    vmid: "{{ proxmox_lxc_cfg.vmid }}"
+    state: started
+
+- name: Set up the pct exec PATH shim in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_tasks: nixos_path_shim.yml
+  when: proxmox_lxc_cfg.nixos_path_shim | default(false)
+
+# The ip6=manual links have no address until networkd runs, so configure them
+# host-side here, before the tenant layer needs the guest's network (apt, pulls).
+- name: Set up systemd-networkd addressing in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_tasks: networkd.yml
+  when: proxmox_lxc_cfg.networkd_interfaces is defined
+
+- name: Reload networkd in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.command:
+    cmd: pct exec {{ proxmox_lxc_cfg.vmid }} -- networkctl reload
+  changed_when: true
+  when:
+    - proxmox_lxc_cfg.networkd_interfaces is defined
+    - proxmox_lxc_networkd_changed

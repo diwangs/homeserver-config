@@ -1,0 +1,5 @@
+---
+# Docker network the Portainer container joins (an existing ipvlan network from
+# roles/common/docker_host), and an optional static IPv6 address within its iprange.
+portainer_network: backend
+portainer_ipv6_address: ""

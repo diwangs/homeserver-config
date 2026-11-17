@@ -1,0 +1,18 @@
+---
+# Full converge: both provisioning stages, then the reconcilable configuration.
+# Every stage is idempotent. On a cold host, stop after init_proxmox and set the
+# DHCPv6 leases first (see playbooks/init_proxmox.yml), e.g.
+#   ansible-playbook site.yml --tags init_proxmox
+#   ansible-playbook site.yml --skip-tags init_proxmox
+# Day-to-day, run playbooks/configure.yml (or --tags configure).
+- name: Provision guests on the Proxmox host
+  ansible.builtin.import_playbook: playbooks/init_proxmox.yml
+  tags: init_proxmox
+
+- name: Provision tenant platforms
+  ansible.builtin.import_playbook: playbooks/init_tenant.yml
+  tags: init_tenant
+
+- name: Configure hosts and applications
+  ansible.builtin.import_playbook: playbooks/configure.yml
+  tags: configure

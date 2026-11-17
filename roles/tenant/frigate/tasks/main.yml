@@ -1,0 +1,26 @@
+---
+# Mutable in-tenant config: the Docker application stack. Re-runnable; driven by
+# playbooks/configure.yml. The Docker engine and networks come from
+# roles/common/docker_host (playbooks/init_tenant.yml).
+
+# Setup caddy server to handle IPv6 of IPv4 only services (like frigate)
+- name: Set up caddy
+  ansible.builtin.import_tasks: caddy.yml
+
+- name: Set up storage
+  ansible.builtin.include_role:
+    name: cifs_mount
+  vars:
+    cifs_mount_share: frigate
+    cifs_mount_label: Frigate
+    cifs_mount_username: "{{ frigate_smb_username }}"
+    cifs_mount_password: "{{ frigate_smb_password }}"
+
+- name: Set up Portainer
+  ansible.builtin.include_role:
+    name: portainer
+  vars:
+    portainer_network: backend
+
+- name: Set up Frigate
+  ansible.builtin.import_tasks: frigate.yml

@@ -1,0 +1,13 @@
+---
+- name: Install packages required by the prydwen configuration
+  community.openwrt.apk:
+    name: "{{ prydwen_packages | unique | join(',') }}"
+    state: present
+    update_cache: "{{ prydwen_bootstrap_mode | bool }}"
+  when: prydwen_packages | length > 0
+
+- name: Remove conflicting router packages
+  community.openwrt.apk:
+    name: "{{ prydwen_absent_packages | unique | join(',') }}"
+    state: absent
+  when: prydwen_absent_packages | length > 0

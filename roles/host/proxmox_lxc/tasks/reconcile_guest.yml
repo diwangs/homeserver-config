@@ -1,0 +1,68 @@
+---
+- name: Set up the pct exec PATH shim in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_tasks: nixos_path_shim.yml
+  when: proxmox_lxc_cfg.nixos_path_shim | default(false)
+
+# cores/memory/swap hot-apply, no restart needed — kept in their own call so
+# resizing a container doesn't bounce it. hostname is immutable, but the proxmox
+# module requires it whenever state=present (the default) — pass it through.
+- name: Reconcile LXC resources for {{ proxmox_lxc_cfg.hostname }}
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    vmid: "{{ proxmox_lxc_cfg.vmid }}"
+    hostname: "{{ proxmox_lxc_cfg.hostname }}"
+    cores: "{{ proxmox_lxc_cfg.cores }}"
+    memory: "{{ proxmox_lxc_cfg.memory }}"
+    swap: "{{ proxmox_lxc_cfg.swap }}"
+    update: true
+
+# Only for guests whose NICs changed after creation (reconcile_netif). Proxmox adds
+# a generated hwaddr to every NIC, so pushing netif onto the others would rewrite
+# them. A NIC change restarts the container below.
+- name: Reconcile LXC network interfaces for {{ proxmox_lxc_cfg.hostname }}
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    vmid: "{{ proxmox_lxc_cfg.vmid }}"
+    hostname: "{{ proxmox_lxc_cfg.hostname }}"
+    netif: "{{ proxmox_lxc_cfg.netif }}"
+    update: true
+  register: proxmox_lxc_netif
+  when: proxmox_lxc_cfg.reconcile_netif | default(false)
+
+# A changed mount takes effect on the next container restart.
+- name: Reconcile LXC config lines for {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/{{ proxmox_lxc_cfg.vmid }}.conf
+    regexp: "^{{ item.key }}:"
+    line: "{{ item.key }}: {{ item.value }}"
+    state: present
+  loop: "{{ proxmox_lxc_cfg.config_lines | default([]) }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# Ensures a newly-added interface gets its .network file; on a netif change the
+# restart below applies it on boot.
+- name: Set up systemd-networkd addressing in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.include_tasks: networkd.yml
+  when: proxmox_lxc_cfg.networkd_interfaces is defined
+
+# Applied now, before the later tenant plays need the guest's network.
+# Inline rather than a handler: one handler would be shared by every guest in the
+# loop, so notifications for different vmids would collapse into a single run.
+- name: Restart to apply network interface changes, LXC {{ proxmox_lxc_cfg.hostname }} # noqa: no-handler
+  community.proxmox.proxmox:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    vmid: "{{ proxmox_lxc_cfg.vmid }}"
+    state: restarted
+  when: proxmox_lxc_netif is changed
+
+- name: Reload networkd in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.command:
+    cmd: pct exec {{ proxmox_lxc_cfg.vmid }} -- networkctl reload
+  changed_when: true
+  when:
+    - proxmox_lxc_cfg.networkd_interfaces is defined
+    - proxmox_lxc_networkd_changed

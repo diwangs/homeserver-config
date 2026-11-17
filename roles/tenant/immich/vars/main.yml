@@ -1,0 +1,5 @@
+---
+immich_db_username: immich
+immich_db_database_name: immich
+# Alphanumeric only — Immich rejects symbols in the DB password.
+immich_db_password: "{{ vault_immich_db_password }}"

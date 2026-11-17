@@ -1,0 +1,16 @@
+---
+- name: Ensure the journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Cap the persistent journal size
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/50-size.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/journald).
+      [Journal]
+      SystemMaxUse={{ journald_system_max_use }}
+  notify: Restart journald

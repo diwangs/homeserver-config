@@ -1,6 +1,0 @@
----
-# Mutable resources. Read at creation (init_lxc.yml) and reconciled onto the live
-# container by roles/seedbox/tasks/config_lxc.yml (proxmox update: true).
-seedbox_cores: 1
-seedbox_memory: 128
-seedbox_swap: 512

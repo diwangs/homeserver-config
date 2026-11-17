@@ -1,0 +1,8 @@
+---
+# Intentionally empty. Unlike the other tenants this role holds no secret and needs
+# no vault indirection: TLS is provisioned over ACME HTTP-01, which authenticates by
+# serving a challenge file on port 80 rather than by an API credential, and tuwunel
+# has allow_registration = false so there is no registration token either.
+#
+# See the security.acme comment in files/nixos/configuration.nix for why HTTP-01
+# rather than DNS-01.

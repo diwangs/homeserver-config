@@ -1,0 +1,13 @@
+---
+# NixOS guests (matrix, hermes, hermes-gateway), unlike every other tenant. Two
+# consequences:
+#
+# 1. Ansible's `auto` interpreter discovery probes fixed paths (/usr/bin/python3
+#    and friends), none of which exist here. python3 is in systemPackages, so it
+#    lands in the system profile.
+ansible_python_interpreter: /run/current-system/sw/bin/python3
+
+# 2. The dist-upgrade tooling (roles/maintenance/debian_dist_upgrade, playbooks/upgrade_lxc_dist.yml)
+#    asserts ansible_distribution == "Debian" and drives apt. These guests upgrade by
+#    bumping flake.lock and re-running playbooks/configure.yml instead, so they define
+#    no tenant_repo_role/tenant_repo_tasks and must not be passed to that playbook.

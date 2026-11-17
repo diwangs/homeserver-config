@@ -1,0 +1,71 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 105
+  hostname: immich
+  # Newest Debian 13 (Trixie), resolved + downloaded by roles/host/proxmox_templates.
+  template: debian13
+  # Holds docker images (~4 GB), Postgres data, ML model cache, and the regenerable
+  # thumbs/encoded-video dirs (kept off ZFS so browsing doesn't wake the HDDs).
+  # Grow later with `pct resize 105 rootfs +NG` if the library outpaces it.
+  disk: local-lvm:64
+  cores: 2
+  memory: 6144 # 6 GB — Immich's recommendation with machine learning enabled
+  swap: 2048
+  netif:
+    # backend (VLAN 3)
+    # ip6=manual: ifupdown only brings eth0 up; systemd-networkd owns addressing
+    # (DHCPv6 + RA), deployed host-side via networkd_interfaces below — Docker makes
+    # this a forwarding host, so the kernel ignores RAs (docker/for-linux#844).
+    net0: "name=eth0,bridge=vmbr1,tag=3,firewall=1,ip6=manual"
+  unprivileged: true # iGPU passthrough uses dev0 (not frigate's raw lxc lines), so no need for privileged
+  features:
+    - nesting=1 # Required to run docker
+    # No fuse: no borg job for Immich by decision — backup scope is the built-in
+    # nightly DB dump into UPLOAD_LOCATION/backups/ on the RAID-Z pool (see README).
+  # UPLOAD_LOCATION root on the encrypted RAID-Z pool (originals, profile pictures,
+  # and Immich's nightly DB dumps in backups/). The regenerable hot-path dirs
+  # (thumbs/, encoded-video/) are NOT here — they live on the Optane-backed rootfs.
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Immich
+      owner: diwangs
+      group: diwangs
+      mode: "0770"
+  # immich-server runs as uid 1000 in-container (docker `user:`), so everything it
+  # writes to the ZFS upload mount is owned by diwangs on the host.
+  idmap:
+    id: 1000
+    host_id: 1000
+  config_lines:
+    # iGPU render node for QSV hardware transcoding. Proxmox's native dev
+    # passthrough creates the node with container-side ownership (root:104) and
+    # installs the device-cgroup allowance. The GPU is shared with frigate.
+    - key: dev0
+      value: /dev/dri/renderD128,gid=104
+      at_create: true
+    # UPLOAD_LOCATION; becomes /data in immich-server. First run: the line lands
+    # while the container is already running, so a manual `pct reboot 105` is
+    # needed once before immich-server first starts (see roles/tenant/immich/README.md).
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Immich,mp=/mnt/immich
+  # The ::26 management address (inventory ansible_host) comes from the router's
+  # DHCPv6 reservation, keyed to this guest's DUID + IAID.
+  networkd_interfaces: [eth0]
+# roles/common/docker_host. The Immich stack runs on a bridge with the server's port
+# published to the host's backend ULA. NAT66 requires Docker's ip6tables and an
+# IPv6-enabled bridge.
+docker_host_ip6tables: true
+# Dedicated bridge for the Immich stack (server, ML, valkey, db). Any unique ULA
+# works here (never routed) — it only must differ from frigate's for hygiene.
+docker_host_bridge_network:
+  name: immich-net
+  subnet: fd00:9a1c:44::/64 # container-internal, NAT66'd to host
+docker_host_ipvlan_network:
+  name: backend
+  parent: eth0
+  subnet: fd5a:715f:1edc:a703::/64
+  gateway: fd5a:715f:1edc:a703::1
+  # NOT ::30/124: frigate's docker daemon already auto-assigns from 30-39 on this
+  # same VLAN, and the two daemons' IPAMs don't coordinate — reusing the range
+  # risks an on-wire address collision.
+  iprange: fd5a:715f:1edc:a703::40/124 # 40 - 4f

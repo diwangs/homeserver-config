@@ -1,0 +1,79 @@
+--- a/gateway/platforms/api_server.py
++++ b/gateway/platforms/api_server.py
+@@ -2184,7 +2184,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
+         model_options: Optional[dict[str, Any]] = None, route: Optional[dict[str, Any]] = None,
+         session_model: Optional[str] = None, confirmed_runtime_lock: bool = False,
+         room_dispatch: Optional[dict[str, Any]] = None,
+-        room_execution_policy: Optional[dict[str, Any]] = None) -> Any:
++        room_execution_policy: Optional[dict[str, Any]] = None,
++        origin_platform: Optional[str] = None) -> Any:
+         """Create an AIAgent from the gateway runtime config + platform toolsets.
+         ``gateway_session_key`` persists across transcripts (memory scope), unlike ``session_id``;
+         ``route`` / ``session_model`` are mutually exclusive; ``confirmed_runtime_lock`` beats the
+@@ -2232,7 +2233,7 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
+             "max_iterations": max_iterations, "quiet_mode": True, "verbose_logging": False,
+             "ephemeral_system_prompt": ephemeral_system_prompt or None,
+             "enabled_toolsets": enabled_toolsets, "session_id": session_id,
+-            "platform": "api_server",
++            "platform": "matrix" if origin_platform == "matrix" else "api_server",
+             "stream_delta_callback": stream_delta_callback,
+             "tool_progress_callback": tool_progress_callback,
+             "tool_start_callback": tool_start_callback,
+@@ -3668,7 +3669,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
+         session_history_delivery: str = "", turn_author: Optional[dict[str, Any]] = None,
+         relay_metadata: Optional[dict[str, Any]] = None, notification_category: str = "result",
+         resume_unanswered_turn: bool = False, approval_notify_callback=None,
+-        approval_session_key: Optional[str] = None, walked_from: Optional[str] = None) -> tuple:
++        approval_session_key: Optional[str] = None, walked_from: Optional[str] = None,
++        origin_platform: Optional[str] = None) -> tuple:
+         """Create an agent and run one turn in a thread executor -> ``(result, usage)``.
+         ``approval_notify_callback`` (with ``approval_session_key``) routes dangerous-command
+         approval requests to the caller's stream, keyed like ``/v1/runs`` approvals (#51871).
+@@ -3723,7 +3725,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
+                         reasoning_callback=reasoning_callback, status_callback=status_callback,
+                         gateway_session_key=gateway_session_key, requested_model=requested_model,
+                         requested_provider=requested_provider, model_options=model_options, route=route,
+-                        session_model=session_model, confirmed_runtime_lock=confirmed_runtime_lock)
++                        session_model=session_model, confirmed_runtime_lock=confirmed_runtime_lock,
++                        origin_platform=origin_platform)
+                     if agent_ref is not None:
+                         agent_ref[0] = agent
+                     if resume_unanswered_turn:
+--- a/gateway/platforms/api_server_openai_routes.py
++++ b/gateway/platforms/api_server_openai_routes.py
+@@ -876,6 +876,13 @@ class OpenAICompatRoutesMixin:
+             body = await request.json()
+         except Exception:
+             return _error_response("Invalid JSON in request body", 400)
++        # Presentation hint only: API authentication, tool policy and session
++        # binding remain owned by the API adapter. Never accept arbitrary platforms.
++        origin_platform = body.get("hermes_origin_platform")
++        if origin_platform not in (None, "matrix"):
++            return _invalid_request("Unsupported hermes_origin_platform")
++        if origin_platform is not None and not self._api_key:
++            return _error_response("Originating platform requires API key authentication", 403)
+         from gateway.platforms.api_server import _request_relay_metadata
+         relay_metadata = _request_relay_metadata(body)
+         messages = body.get("messages")
+@@ -949,7 +956,7 @@ class OpenAICompatRoutesMixin:
+             user_message=user_message, conversation_history=history,
+             ephemeral_system_prompt=system_prompt, session_id=session_id,
+             gateway_session_key=gateway_session_key, **agent_overrides, route=route,
+-            relay_metadata=relay_metadata,
++            relay_metadata=relay_metadata, origin_platform=origin_platform,
+             # #98619: only an explicitly provided X-Hermes-Session-Id is wake-capable (the
+             # header is 403-gated on API_SERVER_KEY, so the wake self-post can authenticate
+             # and the client can resume the session by sending it again). A fingerprint-derived
+--- a/gateway/run_turn.py
++++ b/gateway/run_turn.py
+@@ -715,6 +715,10 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
+         if session_id:
+             headers["X-Hermes-Session-Id"] = session_id
+         body = {"model": "hermes-agent", "messages": api_messages, "stream": True}
++        # Carry the rendering surface across the API hop. Other transports retain
++        # the API default until their presentation semantics are supported here.
++        if source.platform == Platform.MATRIX:
++            body["hermes_origin_platform"] = source.platform.value
+ 
+         _thread_metadata: Optional[dict[str, Any]] = self._thread_metadata_for_source(source, event_message_id)
+         _stream_consumer = (

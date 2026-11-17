@@ -1,0 +1,49 @@
+---
+- name: Enable and reconcile the OpenWrt network service
+  community.openwrt.service:
+    name: network
+    enabled: true
+    state: "{{ 'restarted' if prydwen_finalize_mode | bool else 'started' }}"
+  when: not prydwen_bootstrap_mode | bool
+
+- name: Wait after finalizing the network service
+  community.openwrt.wait_for_connection:
+    delay: 2
+    timeout: 300
+  when:
+    - not prydwen_bootstrap_mode | bool
+    - prydwen_finalize_mode | bool
+    - not ansible_check_mode
+
+# One-shot services (prydwen_oneshot_services, e.g. firewall and sqm) only load
+# kernel state and leave no process behind, so their init scripts never report
+# "running" and `state: started` would re-run their start action on every pass.
+# They are only enabled here; procd starts them at boot and the UCI handler reloads
+# them when their config changes.
+- name: Enable and start network-dependent OpenWrt services
+  community.openwrt.service:
+    name: "{{ item }}"
+    enabled: true
+    state: >-
+      {{ 'restarted' if prydwen_finalize_mode | bool
+         else omit if item in prydwen_oneshot_services
+         else 'started' }}
+  loop: "{{ prydwen_services | reject('equalto', 'network') | list }}"
+  when: not prydwen_bootstrap_mode | bool
+
+- name: Inspect active network namespaces
+  community.openwrt.command:
+    cmd: ip netns list
+  register: prydwen_namespaces
+  check_mode: false
+  changed_when: false
+  when: not prydwen_bootstrap_mode | bool
+
+- name: Start the Jool NAT64 namespace
+  community.openwrt.command:
+    cmd: /etc/jool/setupjool.sh
+  when:
+    - not prydwen_bootstrap_mode | bool
+    - not ansible_check_mode
+    - prydwen_jool.namespace not in prydwen_namespaces.stdout
+  changed_when: true

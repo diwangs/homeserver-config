@@ -1,0 +1,17 @@
+---
+# In-place Debian major upgrade for a single LXC tenant.
+#
+# Usage:
+#   ansible-playbook playbooks/upgrade_lxc_dist.yml                          # defaults to `frigate` (CTID 102)
+#   ansible-playbook playbooks/upgrade_lxc_dist.yml -e upgrade_target=omada  # any Debian tenant
+#   ansible-playbook playbooks/upgrade_lxc_dist.yml -e target_codename=trixie
+#
+# The tenant must be running and have internet egress (its DHCPv6 lease, see
+# playbooks/init_tenant.yml); check with `ansible <host> -m ping`. Not for the lxc_nixos
+# group.
+- name: Dist-upgrade an LXC tenant to a new Debian codename
+  hosts: "{{ upgrade_target | default('frigate') }}"
+  vars:
+    target_codename: trixie
+  roles:
+    - role: debian_dist_upgrade

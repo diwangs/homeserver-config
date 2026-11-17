@@ -1,0 +1,9 @@
+---
+# Apply a Caddyfile change. Notified from caddy.yml and flushed there (before the
+# Frigate container is created) so Caddy re-binds off 0.0.0.0:5000 onto the ULA,
+# freeing 127.0.0.1:5000 for Frigate's published port. A full restart (not reload)
+# guarantees the old all-interfaces listener is torn down first.
+- name: Restart caddy
+  ansible.builtin.service:
+    name: caddy
+    state: restarted

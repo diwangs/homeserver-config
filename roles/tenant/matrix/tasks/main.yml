@@ -1,0 +1,58 @@
+---
+# Reconcile the running Matrix guest. Runs in-guest via `pct exec` through the Proxmox
+# host (group_vars/tenant_lxc.yml), from playbooks/configure.yml.
+#
+# This is the whole in-guest layer: NixOS is declarative, so instead of the Debian
+# roles' apt/docker task chain there is one flake tree and one `nixos-rebuild`. The
+# same tree built the image (tasks/build_template.yml), so a rebuild here converges
+# on exactly what the template already contains until the flake is edited.
+
+- name: Ensure the NixOS configuration directory exists
+  ansible.builtin.file:
+    path: /etc/nixos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the NixOS flake tree
+  ansible.builtin.copy:
+    src: nixos/
+    dest: /etc/nixos/
+    owner: root
+    group: root
+    mode: "0644"
+
+# site.nix carries the public identity (domains, Matrix IDs, ACME contact) from
+# the vault; it is not committed, so it is rendered beside the static tree.
+- name: Render the public identity module
+  ansible.builtin.template:
+    src: site.nix.j2
+    dest: /etc/nixos/site.nix
+    owner: root
+    group: root
+    mode: "0644"
+
+# keys.nix (root authorized keys) was retired with inbound SSH; the flake no longer
+# imports it, so drop the stale copy from older deployments.
+- name: Remove the retired authorized-keys module
+  ansible.builtin.file:
+    path: /etc/nixos/keys.nix
+    state: absent
+
+# nixos-rebuild always re-runs the activation script, so its exit status says
+# nothing about whether anything moved. Compare the system closure either side
+# instead, which is the only honest signal.
+# --no-update-lock-file: the committed flake.lock is the pin; without this a
+# rebuild could quietly pull a different nixpkgs than the image was built from.
+- name: Apply the NixOS configuration
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      before=$(readlink -f /run/current-system)
+      nixos-rebuild switch --flake /etc/nixos#matrix --no-update-lock-file
+      after=$(readlink -f /run/current-system)
+      [ "$before" = "$after" ] || echo CHANGED
+    executable: /bin/sh
+  register: matrix_rebuild
+  changed_when: "'CHANGED' in matrix_rebuild.stdout"

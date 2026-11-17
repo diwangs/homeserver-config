@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# Public identity for configuration.nix and gateway-configuration.nix, rendered
+# from the vault (group_vars/all/vars.yml) so the domains and Matrix IDs never sit
+# in the committed flake tree. Shared by roles/tenant/hermes and hermes_gateway.
+# JSON string literals are valid Nix strings, hence to_json for quoting.
+{
+  matrixServerName = {{ matrix_server_name | to_json }};
+  matrixHostName = {{ matrix_hostname | to_json }};
+  hermesHostName = {{ hermes_hostname | to_json }};
+  acmeEmail = {{ acme_email | to_json }};
+  matrixAllowedUsers = {{ hermes_matrix_allowed_users | to_json }};
+}

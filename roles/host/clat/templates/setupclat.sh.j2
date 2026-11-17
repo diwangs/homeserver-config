@@ -1,0 +1,79 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# Adapted from roles/prydwen/templates/setupjool.sh.j2 (the PLAT half of this same
+# 464XLAT pair), but CLAT needs one more veth pair than PLAT does. PLAT's single
+# veth carries both directions because the "clients" (LAN hosts) reach it purely
+# via the router's own routing table (a route for the fixed 64:ff9b::/96
+# destination) — the same link doubles as PLAT's own way back out, since after
+# translation the packet is just real IPv4 routed normally by the main namespace.
+#
+# CLAT has no fixed destination to route on: the traffic that needs translating is
+# identified by SOURCE (any container on the CLAT bridge), which containers reach
+# by plain L2 adjacency, not by a routing decision in the main namespace. That
+# means the netns's LAN-facing interface is fully consumed being the containers'
+# L2-adjacent gateway — it has no spare capacity to also serve as the way out. A
+# second, WAN-facing veth (link-local only, mirroring PLAT's own gateway: fe80::64
+# pattern) gives the netns an outbound path after translation.
+set -eu
+
+namespace='{{ clat_namespace }}'
+lan_host='{{ clat_veth_lan_host }}'
+lan_ns='{{ clat_veth_lan_ns }}'
+wan_host='{{ clat_veth_wan_host }}'
+wan_ns='{{ clat_veth_wan_ns }}'
+
+if ip netns list | awk '{ print $1 }' | grep -qx "$namespace"; then
+    exit 0
+fi
+
+cleanup() {
+    ip netns del "$namespace" 2>/dev/null || true
+    ip link del "$lan_host" 2>/dev/null || true
+    ip link del "$wan_host" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+ip netns add "$namespace"
+
+# LAN-facing pair: bridged onto the CLAT bridge in the main namespace with no
+# address of its own (pure L2 relay) — the gateway address lives on the netns
+# side, so containers reach it by ordinary bridge adjacency, the same as any
+# container reaches any other bridge port.
+ip link add "$lan_host" type veth peer "$lan_ns"
+ip link set dev "$lan_ns" netns "$namespace"
+ip link set dev "$lan_host" master {{ clat_bridge.name }} up
+
+# WAN-facing pair: a plain point-to-point link back into the main namespace,
+# addressed with a fixed link-local only (mirrors prydwen_jool's own
+# `gateway: fe80::64` — a fixed, not auto-EUI64, address, so the netns's default
+# route below has a stable, known next-hop rather than a MAC-derived one).
+ip link add "$wan_host" type veth peer "$wan_ns"
+ip link set dev "$wan_ns" netns "$namespace"
+ip addr add dev "$wan_host" {{ clat_wan_link_local }}/64
+ip link set dev "$wan_host" up
+
+ip netns exec "$namespace" sh <<EOF
+set -eu
+sysctl -w net.ipv4.conf.all.forwarding=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+ip link set dev lo up
+ip link set dev $lan_ns up
+ip addr add dev $lan_ns {{ clat_gateway_ipv4 }}
+ip link set dev $wan_ns up
+ip addr add dev $wan_ns {{ clat_ns_wan_link_local }}/64
+ip -6 route add default via {{ clat_wan_link_local }} dev $wan_ns
+modprobe jool_siit
+jool_siit instance add --netfilter --pool6 {{ clat_pool6 }}
+jool_siit eamt add {{ clat_bridge.cidr }} {{ clat_eam_ipv6_prefix }}
+EOF
+
+# The host's way IN — the mirror of prydwen's own route_nat64. Without this, any
+# packet destined for the EAM prefix (a reply, or PLAT state-tracking traffic)
+# falls through to sentinel-lp's own default route, which points straight back at
+# the router: a two-node ping-pong that burns the hop limit in milliseconds. Added
+# here rather than as a separate persistent route because it's tied to this exact
+# ephemeral veth pair, recreated together with it on every boot.
+ip -6 route add {{ clat_eam_ipv6_prefix }} via {{ clat_ns_wan_link_local }} dev "$wan_host"
+
+trap - EXIT INT TERM

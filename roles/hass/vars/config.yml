@@ -1,5 +1,0 @@
----
-# Mutable resources. Read at creation (init_kvm.yml) and reconciled onto the live
-# VM by roles/hass/tasks/config_resources.yml (proxmox_kvm update: true).
-hass_cores: 2
-hass_memory: 6144

@@ -1,0 +1,5 @@
+---
+# Upper bound for the persistent systemd journal on a Debian guest. journald's own
+# default is 10% of the filesystem (up to 4 GiB), which is a lot on small LXC rootfs
+# disks that also hold Docker images.
+journald_system_max_use: 200M

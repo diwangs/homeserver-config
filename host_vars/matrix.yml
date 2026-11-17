@@ -1,0 +1,60 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 106
+  hostname: matrix
+  # Not a pveam Debian image: a NixOS tarball built from roles/tenant/matrix/files/nixos by
+  # roles/tenant/matrix/tasks/build_template.yml, which runs right before the create task.
+  template: nixos
+  template_role: matrix
+  # ostype=nixos stops Proxmox applying its Debian-style guest fixups.
+  ostype: nixos
+  nixos_path_shim: true
+  # RocksDB state + media on the Optane rootfs. Backups go to ZFS via mp0.
+  disk: local-lvm:32
+  cores: 2
+  # Tuwunel is a single Rust process and idles well under 1 GB; the headroom is for
+  # nixos-rebuild evaluation, which is the memory-hungriest thing this guest does.
+  memory: 2048
+  swap: 2048
+  netif:
+    # dmz (VLAN 6) — the zone is already forwarded from wan (see host_vars/prydwen.yml
+    # forward_wan_dmz), so a public service needs no per-service firewall rule.
+    # ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix rather than pushed in with pct exec.
+    # hwaddr is pinned rather than left to Proxmox to generate, so the router's lease
+    # (which matches on mac as well as duid) stays valid if the container is ever
+    # recreated — the same reason the DUID/IAID are pinned in configuration.nix.
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual,hwaddr=BC:24:11:A6:7C:C4"
+    # Outbound-only IPv4 for genuinely IPv4-only destinations, via roles/host/clat/ — see
+    # that role's README. vmbr2 is a plain, untagged, single-purpose bridge (not part
+    # of the vmbr1 VLAN trunk), so no `tag=` here. ip=manual for the same reason as
+    # eth6 above: the static address lives in files/nixos/configuration.nix.
+    net7: "name=eth46,bridge=vmbr2,ip=manual"
+  # net7/eth46 was added after the container already existed, so netif is
+  # reconciled (and the container restarted on a change), like frigate's.
+  reconcile_netif: true
+  unprivileged: true
+  features:
+    - nesting=1 # Required by the Nix daemon's build sandbox
+    # No fuse: backups are RocksDB-native (database_backup_path), not borg.
+  # RocksDB online backup repository on the encrypted RAID-Z pool. Created here
+  # rather than left to the mount, which would otherwise land root-owned and
+  # unwritable by the service.
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Backup/matrix
+      owner: diwangs
+      group: diwangs
+      mode: "0770"
+  # tuwunel's service user is pinned to uid 1000 in files/nixos/configuration.nix,
+  # so the RocksDB backups it writes are owned by diwangs on the host.
+  idmap:
+    id: 1000
+    host_id: 1000
+  config_lines:
+    # database_backup_path in files/nixos/configuration.nix. First run: the line
+    # lands while the container is already running, so a manual `pct reboot 106` is
+    # needed once before the first backup can succeed (see roles/tenant/matrix/README.md).
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Backup/matrix,mp=/mnt/matrix-backup
+  # No networkd_interfaces: eth6 addressing ships inside the NixOS image.

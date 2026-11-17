@@ -1,0 +1,34 @@
+---
+# https://pve.proxmox.com/wiki/Unprivileged_LXC_containers
+#
+# Map container uid/gid `id` onto host uid/gid `host_id` and keep the rest of the
+# default 100000-based range around it. Each line is matched on its own exact
+# content, so re-running is a true no-op regardless of where Proxmox has moved it in
+# the file. Duplicate idmap entries are only read at container start, so the damage
+# would stay invisible until the next boot ("container uid 0 is also mapped by
+# entry") — hence lineinfile per line, never blockinfile.
+- name: Pass through the mapped uid/gid to {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.lineinfile:
+    path: /etc/pve/lxc/{{ proxmox_lxc_cfg.vmid }}.conf
+    regexp: "^lxc\\.idmap: {{ item }}$"
+    line: "lxc.idmap: {{ item }}"
+    state: present
+  vars:
+    _id: "{{ proxmox_lxc_cfg.idmap.id | int }}"
+    _host_id: "{{ proxmox_lxc_cfg.idmap.host_id | int }}"
+  loop:
+    - "u 0 100000 {{ _id }}"
+    - "g 0 100000 {{ _id }}"
+    - "u {{ _id }} {{ _host_id }} 1"
+    - "g {{ _id }} {{ _host_id }} 1"
+    - "u {{ _id | int + 1 }} {{ 100000 + _id | int + 1 }} {{ 65536 - _id | int - 1 }}"
+    - "g {{ _id | int + 1 }} {{ 100000 + _id | int + 1 }} {{ 65536 - _id | int - 1 }}"
+
+# Identical lines across guests sharing a host_id — a no-op when already present.
+- name: Allow root to do the mapping
+  ansible.builtin.lineinfile:
+    path: "/etc/{{ item }}"
+    line: "root:{{ proxmox_lxc_cfg.idmap.host_id }}:1"
+  loop:
+    - subuid
+    - subgid

@@ -1,0 +1,5 @@
+---
+- name: Restart hd-idle to apply configuration changes
+  ansible.builtin.systemd_service:
+    name: hd-idle
+    state: restarted

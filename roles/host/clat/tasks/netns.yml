@@ -1,0 +1,65 @@
+---
+- name: Ensure the Jool configuration directory exists
+  ansible.builtin.file:
+    path: /etc/jool
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the idempotent CLAT namespace setup script
+  ansible.builtin.template:
+    src: setupclat.sh.j2
+    dest: /etc/jool/setupclat.sh
+    owner: root
+    group: root
+    mode: "0755"
+    validate: /bin/sh -n %s
+
+# Type=oneshot + RemainAfterExit=yes is the Debian/systemd equivalent of prydwen's
+# own OpenWrt rc.local + sysupgrade.conf pairing (roles/host/prydwen/tasks/files.yml):
+# run once at boot, stay "active" afterward, nothing further to reconcile until
+# the next reboot recreates the namespace fresh.
+- name: Install the CLAT systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/clat.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=CLAT (Jool SIIT) namespace for outbound IPv4 via containers
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/etc/jool/setupclat.sh
+      ExecStop=/usr/sbin/ip netns del {{ clat_namespace }}
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd for CLAT
+
+- name: Load the CLAT unit before starting it
+  ansible.builtin.meta: flush_handlers
+
+# Ansible-level idempotency check, mirroring roles/host/prydwen/tasks/services.yml's own
+# `prydwen_jool.namespace not in prydwen_namespaces.stdout` gate — avoids reporting
+# "changed" on every run once the namespace already exists (the script itself is
+# also idempotent, but starting an already-`RemainAfterExit`-active oneshot unit is
+# a no-op anyway; this keeps the reported state honest either way).
+- name: Check whether the CLAT namespace already exists
+  ansible.builtin.command: ip netns list
+  register: clat_namespaces
+  changed_when: false
+  check_mode: false # read-only; --check would otherwise skip this and leave
+  # clat_namespaces.stdout empty for the `when` below
+
+- name: Enable and start clat.service
+  ansible.builtin.systemd:
+    name: clat.service
+    enabled: true
+    state: started
+  when: clat_namespace not in clat_namespaces.stdout

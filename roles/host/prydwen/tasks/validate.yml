@@ -1,0 +1,34 @@
+---
+- name: Read OpenWrt release metadata
+  community.openwrt.command:
+    cmd: cat /etc/openwrt_release
+  register: prydwen_release
+  check_mode: false
+  changed_when: false
+
+- name: Require OpenWrt 25.12.x with APK
+  ansible.builtin.assert:
+    that:
+      - "\"DISTRIB_RELEASE='25.12.\" in prydwen_release.stdout"
+      - openwrt_package_manager == 'apk'
+    fail_msg: This role supports OpenWrt 25.12.x targets using APK only.
+
+- name: Validate required role inputs
+  ansible.builtin.assert:
+    that:
+      - prydwen_physical_devices | length > 0
+      - >-
+        prydwen_lan_qos_devices |
+        difference(prydwen_physical_devices) |
+        length == 0
+      - prydwen_uci_sections | length > 0
+      - prydwen_ssh_authorized_keys | length > 0
+      - prydwen_root_password_hash is defined
+      - prydwen_cloudflare_api_token is defined
+    fail_msg: Required prydwen topology or vaulted credentials are missing.
+
+- name: Verify declared physical network devices exist
+  community.openwrt.command:
+    cmd: "ip link show dev {{ item }}"
+  loop: "{{ prydwen_physical_devices | unique }}"
+  changed_when: false

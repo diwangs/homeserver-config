@@ -1,9 +1,36 @@
-[baremetal]
-sentinel-lp ansible_host=fd5a:715f:1edc:a703::10 ansible_connection=ssh ansible_user=root
+# sentinel-lp and prydwen are reached as root over SSH with the automation key
+# (private_key_file in ansible.cfg). The lxc guests are reached through sentinel-lp
+# with `pct exec` instead (group_vars/tenant_lxc.yml); their ansible_host is only their
+# own address, for reference by other roles.
+[all:vars]
+ansible_connection=ssh
+ansible_user=root
 
-[lxc]
-nas ansible_host=fd5a:715f:1edc:a703::20 ansible_connection=ssh ansible_user=root
-omada ansible_host=fd5a:715f:1edc:a703::21 ansible_connection=ssh ansible_user=root
-frigate ansible_host=fd5a:715f:1edc:a703::22 ansible_connection=ssh ansible_user=root
-nextcloud ansible_host=fd5a:715f:1edc:a706::23 ansible_connection=ssh ansible_user=root
-seedbox ansible_host=fd5a:715f:1edc:a703::25 ansible_connection=ssh ansible_user=root
+[host]
+prydwen ansible_host=fd5a:715f:1edc:a702::1
+sentinel-lp ansible_host=fd5a:715f:1edc:a703::10
+
+# Order matters: proxmox_lxc creates/reconciles guests in this order, and
+# hermes-gateway's template is built on hermes, so hermes must come first.
+[tenant_lxc]
+nas ansible_host=fd5a:715f:1edc:a703::20
+omada ansible_host=fd5a:715f:1edc:a703::21
+frigate ansible_host=fd5a:715f:1edc:a703::22
+nextcloud ansible_host=fd5a:715f:1edc:a706::23
+seedbox ansible_host=fd5a:715f:1edc:a703::25
+immich ansible_host=fd5a:715f:1edc:a703::26
+matrix ansible_host=fd5a:715f:1edc:a706::27
+hermes ansible_host=fd5a:715f:1edc:a703::28
+hermes-gateway ansible_host=fd5a:715f:1edc:a706::29
+
+# Debian tenants running Docker (roles/common/docker_host); per-host network params in host_vars.
+[lxc_docker]
+frigate
+nextcloud
+immich
+
+# NixOS tenants: no apt, no dist-upgrade; see group_vars/lxc_nixos.yml.
+[lxc_nixos]
+matrix
+hermes
+hermes-gateway

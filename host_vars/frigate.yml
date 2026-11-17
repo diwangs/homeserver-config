@@ -1,5 +1,53 @@
 ---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 102
+  hostname: frigate
+  # TODO: make sure the template exist first?
+  template: debian12
+  disk: local-lvm:16 # 16 GB
+  cores: 2
+  memory: 1024 # 1 GB (frigate w/ ffmpeg restream)
+  swap: 4096
+  # Reconciled onto the live container too (reconcile_netif) so the DMZ NIC (net6)
+  # could be added without a rebuild; a NIC change restarts the container.
+  # ip6=manual: ifupdown only brings the link up; systemd-networkd owns addressing
+  # (DHCPv6/RA), deployed host-side via networkd_interfaces below.
+  netif:
+    net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip6=manual" # backend (VLAN 3)
+    net4: "name=eth4,bridge=vmbr1,tag=4,firewall=1,ip=dhcp"
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual" # dmz (VLAN 6)
+  reconcile_netif: true
+  unprivileged: false # Required for passing GPU
+  features:
+    - nesting=1 # Required to run docker
+  # Attach iGPU for hardware codec (temporary solution). One lineinfile per line,
+  # not blockinfile: Proxmox normalizes /etc/pve/lxc/102.conf and hoists lxc.* keys
+  # out from between the markers.
+  raw_lines:
+    - "lxc.cgroup2.devices.allow: c 226:128 rwm"
+    - "lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file"
+  # eth4 is ip=dhcp, so ifupdown handles it — only the ip6=manual links need networkd.
+  # The ::22 management address (inventory ansible_host) and the GUA come from the
+  # router's DHCPv6 reservation, keyed to this guest's DUID + per-interface IAID.
+  networkd_interfaces: [eth3, eth6]
+# roles/common/docker_host. Frigate runs on a bridge with per-host-IP published ports
+# (WebRTC media on the DMZ, everything else on backend). NAT66 requires Docker's
+# ip6tables and an IPv6-enabled bridge.
+docker_host_ip6tables: true
+# Dedicated bridge for the Frigate container. The internal ULA is NAT66'd to the
+# host; reachability is via the published ports bound to the host's eth3/eth6 ULAs.
+docker_host_bridge_network:
+  name: frigate-net
+  subnet: fd00:f81a:7e::/64 # container-internal, NAT66'd to host
+docker_host_ipvlan_network:
+  name: backend
+  parent: eth3
+  subnet: fd5a:715f:1edc:a703::/64
+  gateway: fd5a:715f:1edc:a703::1
+  iprange: fd5a:715f:1edc:a703::30/124 # 30 - 39
+
 # Third-party repo task re-laid (with the target codename) by the dist-upgrade
-# playbook — see tasks/debian_dist_upgrade.yml.
-tenant_repo_role: frigate
-tenant_repo_tasks: init_docker_repo.yml
+# playbook — see roles/maintenance/debian_dist_upgrade.
+tenant_repo_role: docker_host
+tenant_repo_tasks: repo.yml

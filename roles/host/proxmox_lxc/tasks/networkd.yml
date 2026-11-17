@@ -1,0 +1,34 @@
+---
+# Host-side (pct exec) systemd-networkd addressing for a guest's ip6=manual links.
+#
+# ifupdown only brings these links up, so networkd owns addressing. It is driven
+# host-side so the guest has working networking (apt, image pulls) before the
+# tenant layer runs. Unlike
+# dhcpcd, networkd drives links over rtnetlink (no udev, no .device units), so its
+# DHCPv6 client works in unprivileged LXCs, and it ships with systemd (nothing to
+# install). It processes RAs in userspace and installs the default route itself,
+# covering Docker/forwarding hosts too (the kernel ignores RAs while forwarding —
+# github.com/docker/for-linux/issues/844). Proxmox never touches
+# /etc/systemd/network, so these files survive the interfaces-file regeneration.
+#
+# Addressing is DHCPv6 + RA only (no static Address=); the management address
+# (inventory ansible_host) comes from the router's DHCPv6 reservation, keyed to the
+# guest's DUID + per-interface IAID. The caller reloads networkd when
+# proxmox_lxc_networkd_changed is set.
+- name: Reset the networkd change tracker
+  ansible.builtin.set_fact:
+    proxmox_lxc_networkd_changed: false
+
+# One include per interface (not a looped command) so each file task can use the
+# registered-result `changed_when` idiom on a single, non-looped result.
+- name: Deploy systemd-networkd config per interface
+  ansible.builtin.include_tasks: networkd_interface.yml
+  loop: "{{ proxmox_lxc_cfg.networkd_interfaces }}"
+  loop_control:
+    loop_var: proxmox_lxc_iface
+
+- name: Enable systemd-networkd in {{ proxmox_lxc_cfg.hostname }}
+  ansible.builtin.command:
+    cmd: pct exec {{ proxmox_lxc_cfg.vmid }} -- systemctl enable --now systemd-networkd.socket systemd-networkd.service
+  register: proxmox_lxc_networkd_enable
+  changed_when: "'Created symlink' in proxmox_lxc_networkd_enable.stderr"

@@ -1,0 +1,42 @@
+# Template: copy to fly.toml (gitignored) and fill in the real app name and region
+# (vault: vault_fly_app_name, vault_fly_primary_region).
+#
+# The app name predates this proxy fronting more than Nextcloud; renaming a live
+# Fly app means recreating it, which would drop the dedicated IPv4 every tenant's
+# A record points at. See nginx.conf for the SNI-based routing that makes sharing
+# it possible.
+app = "your-fly-app"
+primary_region = "your-region"   # set by `fly launch`; change to your nearest region
+
+[build]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 80
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80          # Hermes HTTP-01 challenge and HTTP-to-HTTPS redirect
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 443
+  auto_stop_machines = false   # proxy must stay up; no cold-start dropping connections
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443          # no handlers = raw passthrough, TLS NOT terminated
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8448
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 8448         # Matrix federation; no handlers = raw passthrough
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"      # plenty for an nginx stream proxy

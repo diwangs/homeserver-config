@@ -1,0 +1,55 @@
+---
+- name: Ensure the Jool configuration directory exists
+  community.openwrt.file:
+    path: /etc/jool
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the idempotent Jool namespace setup
+  community.openwrt.template:
+    src: setupjool.sh.j2
+    dest: /etc/jool/setupjool.sh
+    owner: root
+    group: root
+    mode: "0755"
+    validate: /bin/sh -n %s
+  notify: Reconfigure prydwen Jool
+
+- name: Run Jool setup during boot
+  community.openwrt.lineinfile:
+    path: /etc/rc.local
+    regex: "^/etc/jool/setupjool\\.sh$"
+    line: /etc/jool/setupjool.sh
+    insertbefore: "^exit 0$"
+
+- name: Preserve Jool setup across sysupgrade
+  community.openwrt.lineinfile:
+    path: /etc/sysupgrade.conf
+    regex: "^/etc/jool/setupjool\\.sh$"
+    line: /etc/jool/setupjool.sh
+    insertafter: EOF
+
+- name: Install direct CAKE queues for inter-VLAN traffic
+  community.openwrt.template:
+    src: lan-qos.init.j2
+    dest: /etc/init.d/lan-qos
+    owner: root
+    group: root
+    mode: "0755"
+    validate: /bin/sh -n %s
+  notify: Reconcile prydwen LAN QoS
+
+- name: Preserve the LAN QoS service across sysupgrade
+  community.openwrt.lineinfile:
+    path: /etc/sysupgrade.conf
+    regex: "^/etc/init\\.d/lan-qos$"
+    line: /etc/init.d/lan-qos
+    insertafter: EOF
+
+- name: Remove inactive package-manager migration leftovers
+  community.openwrt.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ prydwen_stale_files }}"

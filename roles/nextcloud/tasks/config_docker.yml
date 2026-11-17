@@ -1,7 +1,0 @@
----
-# Mutable in-tenant config: the Docker application stack. Re-runnable; driven by
-# configure.yml.
-- name: Set up Portainer
-  ansible.builtin.include_tasks: config_portainer.yml
-- name: Set up Nextcloud AIO
-  ansible.builtin.include_tasks: config_nextcloud_aio.yml

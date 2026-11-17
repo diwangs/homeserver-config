@@ -1,0 +1,4 @@
+---
+hermes_gateway_matrix_token: "{{ vault_hermes_matrix_token }}"
+hermes_gateway_proxy_key: "{{ vault_hermes_proxy_key }}"
+hermes_gateway_recovery_key: "{{ vault_hermes_matrix_recovery_key }}"

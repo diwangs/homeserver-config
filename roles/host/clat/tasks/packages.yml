@@ -1,0 +1,71 @@
+---
+# jool-dkms/jool-tools are in Debian trixie's own `main` component — no third-party
+# repo needed, unlike the deb822 pattern the tenant roles use for Docker etc.
+- name: Install PVE kernel headers for the Jool DKMS build
+  ansible.builtin.apt:
+    name: "pve-headers-{{ ansible_kernel }}"
+    state: present
+    update_cache: true
+
+# Debian trixie ships jool-dkms 4.1.13-1.1, which fails its DKMS build on any
+# kernel new enough to have dropped two compat wrappers this host's PVE 7.0.x
+# kernel already lacks: `struct flowi4.flowi4_tos` (renamed to `flowi4_dscp`,
+# upstream NICMx/Jool#441 / Debian #1120527, fixed in jool 4.1.15) and
+# `del_timer_sync` (renamed `timer_delete_sync`, Debian #1106551, fixed in jool
+# 4.1.14). Neither fix is in trixie yet, and jool-dkms isn't in trixie-backports
+# either (confirmed at build time) — patched onto the installed 4.1.13 source
+# below instead of pulling a newer package from a foreign suite, to avoid mixing
+# Debian suites on a production hypervisor. `ignore_errors`, not `failed_when:
+# false` — the latter would make `is failed` below always read false, silently
+# skipping the patch step on every run.
+- name: Install Jool (SIIT/CLAT) kernel module and userspace tools
+  ansible.builtin.apt:
+    name: [jool-dkms, jool-tools]
+    state: present
+  register: clat_jool_install
+  ignore_errors: true
+
+- name: Apply the upstream flowi4_tos/dscp kernel-compat fix (NICMx/Jool#441)
+  ansible.posix.patch:
+    src: jool-flowi4-dscp.patch
+    basedir: /usr/src/jool-{{ clat_jool_version }}
+    strip: 1
+  when: clat_jool_install is failed
+  register: clat_jool_patch1
+
+- name: Apply the upstream timer_delete_sync kernel-compat fix (jool 4.1.14)
+  ansible.posix.patch:
+    src: jool-timer-delete-sync.patch
+    basedir: /usr/src/jool-{{ clat_jool_version }}
+    strip: 1
+  when: clat_jool_install is failed
+  register: clat_jool_patch2
+
+# Re-running `apt install` retriggers dpkg's --configure of the half-configured
+# jool-dkms, which reruns its postinst (dkms autoinstall) against the now-patched
+# /usr/src/ tree — for every installed kernel's headers, not just the running one,
+# so this also fixes future kernel updates on this host without touching this role.
+- name: Retry the Jool install now that the source is patched
+  ansible.builtin.apt:
+    name: [jool-dkms, jool-tools]
+    state: present
+  when: >-
+    clat_jool_install is failed and
+    (clat_jool_patch1 is changed or clat_jool_patch2 is changed)
+
+# apt reporting success says nothing about whether the DKMS build actually
+# produced a loadable module for THIS kernel — the exact failure mode above,
+# which apt alone would not have surfaced as clearly without the explicit check.
+- name: Verify the jool_siit module actually built for the running kernel
+  ansible.builtin.command: modinfo jool_siit
+  register: clat_modinfo
+  changed_when: false
+  check_mode: false # read-only; --check would otherwise skip this and leave
+  # clat_modinfo.rc undefined for the failed_when below
+  failed_when: clat_modinfo.rc != 0
+
+- name: Load the jool_siit module
+  community.general.modprobe:
+    name: jool_siit
+    state: present
+    persistent: present

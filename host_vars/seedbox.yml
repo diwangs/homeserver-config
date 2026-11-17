@@ -1,5 +1,23 @@
 ---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 104
+  hostname: seedbox
+  # TODO: make sure the template exist first?
+  template: debian12
+  disk: local-lvm:200 # 200 GB for storing unfinished torrents
+  cores: 1
+  memory: 256 # Spiked when moving files to NAS, lower results in oom
+  swap: 1024
+  netif:
+    # net0: DHCPv6
+    net0: "name=eth0,bridge=vmbr1,tag=3,firewall=1,ip6=dhcp"
+  unprivileged: false # Needed for SMB mounting
+  features:
+    - nesting=1 # Newer Systemd requires namespacing
+    - mount=cifs
+
 # Third-party repo task re-laid (with the target codename) by the dist-upgrade
-# playbook — see tasks/debian_dist_upgrade.yml.
+# playbook — see roles/maintenance/debian_dist_upgrade.
 tenant_repo_role: seedbox
-tenant_repo_tasks: init_nikoneko_repo.yml
+tenant_repo_tasks: nikoneko_repo.yml

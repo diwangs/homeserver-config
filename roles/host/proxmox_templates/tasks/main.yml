@@ -1,0 +1,31 @@
+---
+# Registers `proxmox_templates_debian13`, which roles/host/proxmox_lxc reads for guests with
+# `template: debian13`, so this must run earlier in the same play. The Debian 12
+# template the older guests use (proxmox_lxc_debian12_template) is not downloaded.
+#
+# Resolve the newest Debian 13 (Trixie) template dynamically instead of pinning a
+# patch version. `sort -V` picks the highest version from the appliance catalog.
+- name: Refresh Proxmox appliance template catalog
+  ansible.builtin.command: pveam update
+  changed_when: false
+
+- name: Find latest Debian 13 (Trixie) LXC template
+  ansible.builtin.shell: |
+    set -o pipefail
+    pveam available --section system \
+      | awk '{print $2}' \
+      | grep '^debian-13-standard_' \
+      | sort -V \
+      | tail -n1
+  args:
+    executable: /bin/bash
+  register: proxmox_templates_debian13
+  changed_when: false
+  failed_when: proxmox_templates_debian13.stdout == ""
+
+- name: Download Debian 13 (Trixie) LXC template
+  community.proxmox.proxmox_template:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_password }}"
+    template: "{{ proxmox_templates_debian13.stdout }}"

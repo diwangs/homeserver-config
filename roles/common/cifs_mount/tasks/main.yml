@@ -1,0 +1,35 @@
+---
+- name: Install cifs-utils
+  ansible.builtin.apt:
+    name: cifs-utils
+    state: present
+    update_cache: true
+
+# External credential because fstab-stored cred is not secure (and causes error code 13 at boot)
+- name: Create SMB credential file for {{ cifs_mount_label }}
+  ansible.builtin.copy:
+    dest: /root/{{ cifs_mount_share }}smbcred
+    mode: "0600"
+    content: |
+      username={{ cifs_mount_username }}
+      password={{ cifs_mount_password }}
+
+- name: Mount SMB share {{ cifs_mount_label }}
+  ansible.posix.mount:
+    src: //{{ cifs_mount_server }}/{{ cifs_mount_share }}
+    path: /mnt/{{ cifs_mount_share }}
+    fstype: cifs
+    opts: "{{ cifs_mount_opts | select | join(',') }}"
+    state: mounted
+  vars:
+    cifs_mount_opts:
+      - _netdev
+      - "{{ 'nofail' if cifs_mount_nofail else '' }}" # dropped by select when false
+      - rw
+      - vers=3.0
+      - mfsymlinks
+      - seal
+      - iocharset=utf8
+      - credentials=/root/{{ cifs_mount_share }}smbcred
+      - file_mode=0660
+      - dir_mode=0770

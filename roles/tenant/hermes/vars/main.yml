@@ -1,0 +1,4 @@
+---
+# Shared bearer key for the private CT108 -> CT107 agent API. The Matrix token
+# stays in the vault but is now rendered only into CT108's secrets file.
+hermes_proxy_key: "{{ vault_hermes_proxy_key }}"

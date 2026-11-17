@@ -1,4 +1,0 @@
----
-- name: Updprade
-  ansible.builtin.apt:
-    upgrade: "dist"

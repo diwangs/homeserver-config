@@ -1,0 +1,57 @@
+---
+# Every task commits its change (autocommit) and registers its result, so the
+# "Apply prydwen UCI changes" handler can tell procd exactly which config packages
+# changed — the same config.change event LuCI's apply / reload_config sends.
+- name: Remove conflicting or sample UCI sections
+  community.openwrt.uci:
+    command: absent
+    config: "{{ item.config }}"
+    type: "{{ item.type }}"
+    find: "{{ item.find }}"
+    autocommit: true
+  loop: "{{ prydwen_uci_absent_sections }}"
+  loop_control:
+    label: "{{ item.config }} {{ item.type }} {{ item.find }}"
+  register: prydwen_uci_absent_sections_result
+  notify: Apply prydwen UCI changes
+
+- name: Remove UCI options made implicit by the desired state
+  community.openwrt.uci:
+    command: absent
+    key: "{{ item }}"
+    autocommit: true
+  loop: "{{ prydwen_uci_absent_options }}"
+  register: prydwen_uci_absent_options_result
+  notify: Apply prydwen UCI changes
+
+- name: Reconcile baseline UCI values without replacing defaults
+  community.openwrt.uci:
+    command: set
+    key: "{{ item.key }}"
+    value: "{{ item.value }}"
+    replace: false
+    autocommit: true
+  loop: "{{ prydwen_uci_values }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: prydwen_uci_values_result
+  notify: Apply prydwen UCI changes
+
+- name: Reconcile exactly-owned UCI sections
+  community.openwrt.uci:
+    command: section
+    config: "{{ item.config }}"
+    type: "{{ item.type }}"
+    name: "{{ item.name }}"
+    find: "{{ item.find }}"
+    set_find: true
+    value: "{{ item.value | default({}) }}"
+    replace: "{{ item.replace | default(true) }}"
+    keep_keys: "{{ item.keep_keys | default([]) }}"
+    autocommit: true
+  loop: "{{ prydwen_uci_sections }}"
+  loop_control:
+    label: "{{ item.config }}.{{ item.name }}"
+  no_log: "{{ item.secret | default(false) }}"
+  register: prydwen_uci_sections_result
+  notify: Apply prydwen UCI changes

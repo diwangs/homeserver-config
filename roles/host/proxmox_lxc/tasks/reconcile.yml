@@ -1,0 +1,10 @@
+---
+# Mutable, reconcilable configuration for every live guest. Runs on the Proxmox host
+# (playbooks/configure.yml); safe to re-run any time.
+- name: Reconcile LXC guests
+  ansible.builtin.include_tasks: reconcile_guest.yml
+  loop: "{{ proxmox_lxc_guests }}"
+  loop_control:
+    loop_var: proxmox_lxc_guest
+  vars:
+    proxmox_lxc_cfg: "{{ hostvars[proxmox_lxc_guest].proxmox_lxc }}"

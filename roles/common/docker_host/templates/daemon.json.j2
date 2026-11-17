@@ -1,0 +1,8 @@
+{
+{% if docker_host_ip6tables %}
+  "ip6tables": true,
+{% endif %}
+  "default-network-opts": {"bridge": {"com.docker.network.enable_ipv6": "true"}},
+  "log-driver": "json-file",
+  "log-opts": {"max-size": "{{ docker_host_log_max_size }}", "max-file": "{{ docker_host_log_max_file }}"}
+}

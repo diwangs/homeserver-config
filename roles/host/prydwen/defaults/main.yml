@@ -1,0 +1,31 @@
+---
+prydwen_bootstrap_mode: false
+prydwen_finalize_mode: false
+prydwen_packages: []
+prydwen_absent_packages: []
+prydwen_physical_devices: []
+prydwen_lan_qos_devices: []
+prydwen_uci_sections: []
+prydwen_uci_values: []
+prydwen_uci_absent_sections: []
+prydwen_uci_absent_options: []
+prydwen_stale_files: []
+prydwen_services: []
+# Members of prydwen_services that run once and exit (no daemon), so are only
+# enabled, never "started", on reconcile runs.
+prydwen_oneshot_services:
+  - firewall
+  - sqm
+prydwen_ssh_authorized_keys: []
+prydwen_jool:
+  namespace: jool
+  peer_device: openwrt
+  router_device: jool
+  router_ipv4: 192.168.64.1/24
+  translator_ipv4: 192.168.64.2/24
+  translator_address: 192.168.64.2
+  translator_gateway: 192.168.64.1
+  link_local: fe80::64
+  pool6: 64:ff9b::/96
+  reserved_ports: 32768-32999
+  translated_ports: 33000-65535

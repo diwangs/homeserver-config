@@ -1,0 +1,62 @@
+---
+# CLAT (Jool SIIT) on the Proxmox host — shared outbound IPv4 for containers.
+# See roles/host/clat/README.md for the full design and why each piece is shaped this way.
+
+# Dedicated netns holding the jool_siit instance. Named distinctly from prydwen's
+# own "jool" namespace (a different host, but keeping the names distinct avoids any
+# confusion when reading logs/journals from either side of the same 464XLAT pair).
+clat_namespace: clat
+
+# LAN-facing veth pair: bridged onto clat_bridge in the main namespace (no address
+# of its own — pure L2 relay), with the netns side holding the address containers
+# actually use as their gateway. Mirrors how any container's own veth-to-bridge
+# link works; nothing unusual here.
+clat_veth_lan_host: clat-lan
+clat_veth_lan_ns: clat-veth0
+
+# WAN-facing veth pair: a plain point-to-point link back into the main namespace.
+# Both ends need a route pointing at the OTHER end's link-local address — this is
+# genuinely two routes mirroring prydwen_jool's one, because CLAT's traffic isn't
+# identified by a single fixed destination the way PLAT's is:
+#   - the netns's own default route (below, via clat_wan_link_local) is the netns's
+#     way OUT after translation — the CLAT-side mirror of prydwen_jool's own
+#     `ip route add default via {{ translator_gateway }}`.
+#   - roles/host/clat/tasks/netns.yml's own route into clat_eam_ipv6_prefix (via
+#     clat_ns_wan_link_local, the OTHER end) is the host's way IN — the mirror of
+#     prydwen's `route_nat64`. Miss this half and anything destined for the EAM
+#     prefix (any reply, or state-tracking traffic the PLAT sends back) falls
+#     through to sentinel-lp's own default route, which points straight back at
+#     the router — a two-node ping-pong that burns the hop limit in milliseconds.
+#     Confirmed by hitting exactly this failure mode before adding the route.
+# Both fixed, not auto-EUI64, so each route has a stable, known next-hop rather
+# than one derived from whatever MAC each veth happens to get.
+clat_veth_wan_host: clat-wan
+clat_veth_wan_ns: clat-veth1
+clat_wan_link_local: fe80::46 # main-namespace side; the netns's default route target
+clat_ns_wan_link_local: fe80::4646 # netns side; sentinel-lp's route-in target
+
+# The private IPv4 network containers attach to. Never routed beyond the host;
+# entirely internal to the CLAT function. Named vmbr2 (not e.g. "vmbr-clat") —
+# confirmed at build time that PVE's own iface-name validation rejects dashes for
+# bridge-type interfaces, so the plain numeric convention vmbr0/vmbr1 already use
+# is the only broadly-supported form.
+clat_bridge:
+  name: vmbr2
+  cidr: 10.64.0.0/24
+clat_gateway_ipv4: 10.64.0.1/24
+
+# Upstream version, matching /usr/src/jool-<version>/ — see tasks/packages.yml for
+# why this needs local patches on top of Debian trixie's packaged 4.1.13-1.1.
+clat_jool_version: "4.1.13"
+
+# Well-known NAT64 prefix — matches prydwen_jool.pool6 exactly, since this CLAT and
+# that PLAT are two halves of the same 464XLAT pair.
+clat_pool6: 64:ff9b::/96
+
+# Dedicated /64 for the EAM mapping: hint '46' against the router's confirmed
+# fd5a:715f:1edc:a700::/56 ULA delegation (see host_vars/prydwen.yml for why this
+# needs an explicit route rather than the usual ip6assign pattern). ULA, not GUA —
+# this prefix is pure Jool-internal bookkeeping between this CLAT and prydwen's
+# PLAT; it is never routed on the real internet (stateful NAT64 return traffic is
+# steered by the PLAT's own connection state, not by advertising this prefix).
+clat_eam_ipv6_prefix: "fd5a:715f:1edc:a746::/64"

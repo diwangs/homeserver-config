@@ -1,0 +1,32 @@
+---
+# Guests to create/reconcile, in order. Defaults to the inventory `tenant_lxc` group, whose
+# order is significant (hermes-gateway's template is built on hermes).
+proxmox_lxc_guests: "{{ groups['tenant_lxc'] }}"
+
+# Fixed Debian 12 template the older tenants were created from. Not downloaded by
+# roles/host/proxmox_templates, which only fetches the newest Debian 13.
+proxmox_lxc_debian12_template: debian-12-standard_12.7-1_amd64.tar.zst
+
+# Each guest describes itself in host_vars/<guest>.yml as `proxmox_lxc`:
+#
+#   vmid, hostname, disk, netif, features   creation parameters (required)
+#   template          debian12 | debian13 | nixos
+#   template_role     (nixos) role whose tasks/build_template.yml builds + uploads
+#                     the image and sets proxmox_lxc_built_template
+#   ostype, unprivileged, startup           optional creation parameters; omitted
+#                     from the API call when unset (module defaults apply)
+#   cores, memory, swap                     resources; reconciled by `reconcile`
+#   reconcile_netif   true to also push netif onto the live CT (restarts it on change)
+#   host_dirs         [{path, owner, group, mode}] created on the host at create time
+#   idmap             {id, host_id}: map one container uid/gid onto a host uid/gid
+#   raw_lines         exact lxc.* lines added to the .conf at create time
+#   config_lines      [{key, value, at_create}] `key: value` lines (mpN, devN)
+#                     reconciled by `reconcile`; at_create also applies them at create
+#   nixos_path_shim   true for NixOS guests: make /usr/sbin point at the system
+#                     profile so `pct exec` (the guests' Ansible connection) finds tools
+#   networkd_interfaces  ip6=manual links whose DHCPv6/RA systemd-networkd config is
+#                     pushed in with pct exec (the guest has no address until then)
+#
+# Edits to /etc/pve/lxc/<vmid>.conf are one lineinfile per key/line, never
+# blockinfile: Proxmox normalizes the file and hoists keys out from between
+# markers, so a marked block would be re-added as a duplicate on every run.

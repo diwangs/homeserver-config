@@ -1,0 +1,152 @@
+---
+# The Immich stack: db, cache, machine learning, server — one docker_container
+# task each (repo idiom; upstream ships docker-compose, so compare
+# docker/docker-compose.yml at the pinned tag when upgrading).
+
+# Regenerable hot-path dirs on the Optane rootfs, bind-mounted OVER the ZFS-backed
+# /data so timeline browsing never wakes the HDDs. Plain dirs rather than named
+# volumes: Immich's FAQ notes named volumes don't support non-root access, and
+# immich-server runs as uid 1000 (host passthrough).
+- name: Ensure hot-path directories exist on the LXC rootfs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000" # the immich-server user
+    group: "1000"
+    mode: "0770"
+  loop:
+    - /opt/immich/thumbs
+    - /opt/immich/encoded-video
+
+# Guard against anything being written beneath the overlay. The ZFS-side
+# /mnt/immich/{thumbs,encoded-video} are only the mount points the Optane dirs sit
+# on, so apart from Immich's .immich marker they must stay empty. Anything else
+# there was written by an Immich container running without the overlay: it is
+# invisible to the current server and would never be cleaned up (Immich only
+# deletes the copies it can see), so it accumulates as orphans. Lists the two
+# top-level dirs only, so it barely touches the HDDs.
+- name: Find entries written beneath the Optane overlay
+  ansible.builtin.find:
+    paths:
+      - /mnt/immich/thumbs
+      - /mnt/immich/encoded-video
+    file_type: any
+    hidden: true
+    recurse: false
+    excludes: [.immich]
+  register: immich_shadowed_entries
+
+- name: Refuse to deploy while anything sits beneath the overlay
+  ansible.builtin.assert:
+    that: immich_shadowed_entries.matched == 0
+    fail_msg: >-
+      {{ immich_shadowed_entries.matched }} entr(y/ies) under
+      /mnt/immich/{thumbs,encoded-video} (e.g.
+      {{ immich_shadowed_entries.files[:3] | map(attribute='path') | join(', ') }})
+      are hidden by the Optane overlay. Something wrote there without it. These dirs
+      hold only regenerable data: check that /opt/immich has the live copies, then
+      empty the ZFS side (keeping .immich):
+      for d in thumbs encoded-video; do find /mnt/immich/$d -mindepth 1 ! -path /mnt/immich/$d/.immich -delete; done
+    quiet: true
+
+# Postgres data and ML model cache stay as named volumes (also on the Optane
+# rootfs): their containers run as root/postgres and manage ownership themselves.
+- name: Create Immich volumes
+  community.docker.docker_volume:
+    name: "{{ item }}"
+  loop:
+    - immich_pgdata
+    - immich_model_cache
+
+# Image from the pinned release's docker/docker-compose.yml — Immich bumps it in
+# lockstep with some releases, so re-check when changing immich_version.
+- name: Create Immich database container
+  community.docker.docker_container:
+    name: immich-db
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    restart_policy: always
+    state: started
+    shm_size: 128M
+    networks:
+      - name: immich-net
+    volumes:
+      - immich_pgdata:/var/lib/postgresql/data
+    env:
+      POSTGRES_PASSWORD: "{{ immich_db_password }}"
+      POSTGRES_USER: "{{ immich_db_username }}"
+      POSTGRES_DB: "{{ immich_db_database_name }}"
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      # No DB_STORAGE_TYPE=HDD: immich_pgdata lives on the Optane rootfs.
+
+- name: Create Immich valkey container
+  community.docker.docker_container:
+    name: immich-valkey
+    image: docker.io/valkey/valkey:9
+    restart_policy: always
+    state: started
+    networks:
+      - name: immich-net
+
+# Named exactly `immich-machine-learning` so immich-server's default ML URL
+# (http://immich-machine-learning:3003) resolves without extra env. CPU-only;
+# OpenVINO iGPU inference is a separate concern from QSV transcoding.
+- name: Create Immich machine learning container
+  community.docker.docker_container:
+    name: immich-machine-learning
+    image: "ghcr.io/immich-app/immich-machine-learning:{{ immich_version }}"
+    restart_policy: always
+    state: started
+    networks:
+      - name: immich-net
+    volumes:
+      - immich_model_cache:/cache
+
+- name: Create Immich server container
+  community.docker.docker_container:
+    name: immich-server
+    image: "ghcr.io/immich-app/immich-server:{{ immich_version }}"
+    restart_policy: always
+    state: started
+    networks:
+      - name: immich-net # bridge + NAT66; published port binds the host's backend ULA
+    # Run as uid 1000 (officially supported, Immich FAQ): with the LXC's idmap,
+    # everything written to /data (originals, profile, nightly DB dumps) lands on
+    # the host as diwangs. Supplementary gid 104 matches the dev0 passthrough gid
+    # so this non-root user can open the render node for QSV.
+    user: "1000:1000"
+    groups:
+      - "104"
+    devices:
+      - "/dev/dri/renderD128:/dev/dri/renderD128:rwm"
+    # Published on the backend ULA only (LAN-only by design, no DMZ exposure).
+    # docker-proxy/ip6tables DNATs an IPv6-published port to the container's IPv6
+    # address (see roles/tenant/frigate/tasks/frigate.yml notes), so immich-server must
+    # listen on v6 — IMMICH_HOST below. Fallback if this misbehaves: Caddy
+    # IPv6->IPv4 proxy per roles/tenant/frigate/tasks/caddy.yml.
+    ports:
+      - "[fd5a:715f:1edc:a703::26]:2283:2283"
+    volumes:
+      - /mnt/immich:/data # UPLOAD_LOCATION on ZFS (mp0), wakes HDDs on access
+      - /opt/immich/thumbs:/data/thumbs # regenerable, hot path — Optane
+      - /opt/immich/encoded-video:/data/encoded-video # regenerable — Optane
+      - /etc/localtime:/etc/localtime:ro
+    env:
+      DB_HOSTNAME: immich-db
+      DB_USERNAME: "{{ immich_db_username }}"
+      DB_PASSWORD: "{{ immich_db_password }}"
+      DB_DATABASE_NAME: "{{ immich_db_database_name }}"
+      REDIS_HOSTNAME: immich-valkey
+      IMMICH_HOST: "::"
+      TZ: America/New_York
+    # The image's own healthcheck (immich-healthcheck) builds its URL from IMMICH_HOST,
+    # which with "::" becomes http://:::2283 and fails on every probe. Ping the
+    # server over IPv6 loopback directly instead.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://[::1]:2283/api/server/ping >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# First-run steps (see README): create the admin account, confirm the nightly DB
+# dump schedule, and select Quick Sync under Video transcoding settings.

@@ -1,0 +1,12 @@
+---
+# Immutable provisioning: create, prepare and start every guest that doesn't exist
+# yet. Runs on the Proxmox host (playbooks/init_proxmox.yml); create-once — an
+# existing container is left as is (state: present). Resources are read here only
+# to size the container at creation time; tasks/reconcile.yml owns them afterwards.
+- name: Create LXC guests
+  ansible.builtin.include_tasks: create_guest.yml
+  loop: "{{ proxmox_lxc_guests }}"
+  loop_control:
+    loop_var: proxmox_lxc_guest
+  vars:
+    proxmox_lxc_cfg: "{{ hostvars[proxmox_lxc_guest].proxmox_lxc }}"

@@ -1,0 +1,22 @@
+---
+# Immutable in-tenant provisioning: Docker repo, the Docker engine, and the network
+# fabric. Re-runnable; driven by playbooks/init_tenant.yml.
+#
+# Note: the parent interface's addressing (DHCPv6/RA) is owned by systemd-networkd,
+# configured host-side by roles/host/proxmox_lxc (networkd_interfaces). networkd
+# processes RAs in userspace and installs the default route itself, so it handles
+# this Docker/forwarding host without the old `accept_ra=2` sysctl workaround (the
+# kernel ignores RAs while forwarding — github.com/docker/for-linux/issues/844).
+- name: Set up Docker apt repository
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Download Docker Community Edition
+  ansible.builtin.apt:
+    name: docker-ce
+    state: present
+    update_cache: true
+
+# At this point, you should be able to run `docker run hello-world`
+
+- name: Set up network
+  ansible.builtin.import_tasks: network.yml

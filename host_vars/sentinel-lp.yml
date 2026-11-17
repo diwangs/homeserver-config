@@ -2,6 +2,15 @@
 # Connection password — actual value lives in the encrypted group_vars/all/vault.yml
 ansible_password: "{{ vault_proxmox_password }}"
 
+# community.proxmox 2.0.0 (bundled in ansible 14) requires proxmoxer >= 2.3, but
+# Debian 13/PVE 9 APT only ships python3-proxmoxer 2.2. Point Ansible at a uv-built
+# venv holding proxmoxer 2.3 (created with --system-site-packages so requests etc.
+# stay visible; the venv's proxmoxer shadows the system 2.2). Setup:
+#   apt-get install -y python3-pip && pip install --break-system-packages uv
+#   uv venv --system-site-packages /opt/ansible-venv
+#   uv pip install --python /opt/ansible-venv/bin/python 'proxmoxer>=2.3'
+ansible_python_interpreter: /opt/ansible-venv/bin/python
+
 hdparm_devices:
   - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_D7JEUUGN
     options:
