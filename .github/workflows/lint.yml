@@ -8,6 +8,9 @@ name: lint
 on:
   pull_request:
     branches: [main]
+  # Manual runs (Actions tab, or `gh workflow run lint.yml`), e.g. to make the
+  # check known to GitHub before it can be picked in the ruleset.
+  workflow_dispatch:
 
 permissions:
   contents: read
