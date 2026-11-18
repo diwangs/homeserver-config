@@ -19,12 +19,23 @@ jobs:
   ansible-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      # Same version as the local toolchain, so CI and local runs agree.
-      - run: pip install ansible-lint==25.8.2
-      # Roles from Galaxy (e.g. geerlingguy.hdparm) that playbooks import.
-      - run: ansible-galaxy install -r requirements.yml
-      - run: ansible-lint
+      # Same versions as the local toolchain, so CI and local runs agree. The
+      # full ansible package, not bare ansible-core: it bundles the collections
+      # the playbooks use besides those in requirements.yml (ansible.posix,
+      # community.docker, community.general).
+      - run: pip install ansible==14.6.0 ansible-lint==25.8.2
+      # Galaxy content the playbooks import. The roles go to ~/.ansible/roles
+      # (also on roles_path) rather than the first roles_path entry, which is
+      # inside the repo and would get linted as if it were ours.
+      - run: ansible-galaxy role install -r requirements.yml -p ~/.ansible/roles
+      - run: ansible-galaxy collection install -r requirements.yml
+      # ansible.cfg points at .vault_pass, which is not in the repo. Linting
+      # never decrypts anything, but ansible-lint's syntax check refuses to
+      # start without a password file, so hand it a dummy one.
+      - run: |
+          echo ci-dummy > "$RUNNER_TEMP/vault-pass"
+          ANSIBLE_VAULT_PASSWORD_FILE="$RUNNER_TEMP/vault-pass" ansible-lint
