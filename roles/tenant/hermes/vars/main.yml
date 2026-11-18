@@ -2,3 +2,21 @@
 # Shared bearer key for the private CT108 -> CT107 agent API. The Matrix token
 # stays in the vault but is now rendered only into CT108's secrets file.
 hermes_proxy_key: "{{ vault_hermes_proxy_key }}"
+
+# Linear -> Kanban workers (tasks/linear_kanban.yml). The secrets come from
+# inline-vault variables in group_vars/all/hermes_kanban.yml, next to the plain
+# hermes_github_name/hermes_github_email; the setup is skipped until all of
+# them are set.
+hermes_github_token: "{{ vault_hermes_github_token | default('') }}"
+hermes_linear_client_id: "{{ vault_hermes_linear_client_id | default('') }}"
+hermes_linear_client_secret: "{{ vault_hermes_linear_client_secret | default('') }}"
+hermes_claude_code_oauth_token: "{{ vault_hermes_claude_code_oauth_token | default('') }}"
+hermes_kanban_enabled: >-
+  {{ [hermes_github_token, hermes_github_name | default(''), hermes_github_email | default(''),
+      hermes_linear_client_id, hermes_linear_client_secret,
+      hermes_claude_code_oauth_token] | select | list | length == 6 }}
+
+# Keep in step with credentialsDir and dispatch_profiles in files/nixos/configuration.nix.
+hermes_kanban_credentials_dir: /var/lib/hermes/credentials
+hermes_kanban_profile: coder-claude-code
+hermes_kanban_profile_dir: "/var/lib/hermes/.hermes/profiles/{{ hermes_kanban_profile }}"

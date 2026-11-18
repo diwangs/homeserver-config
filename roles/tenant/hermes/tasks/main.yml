@@ -88,3 +88,7 @@
   notify:
     - Restart Hermes Agent
     - Restart Hermes Backend
+
+- name: Set up the Linear Kanban workers
+  ansible.builtin.import_tasks: linear_kanban.yml
+  when: hermes_kanban_enabled | bool

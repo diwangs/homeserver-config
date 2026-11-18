@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+# Git identity and credentials of the GitHub bot account, for the Kanban
+# workers and the Linear poller (both run as the hermes user, HOME=/var/lib/hermes).
+[user]
+	name = {{ hermes_github_name }}
+	email = {{ hermes_github_email }}
+[credential "https://github.com"]
+	# The empty helper clears any inherited one; `gh` is the token-reading
+	# wrapper from configuration.nix, so git authenticates as the bot.
+	helper =
+	helper = !gh auth git-credential
+[init]
+	defaultBranch = main

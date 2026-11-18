@@ -1,0 +1,117 @@
+---
+# Linear -> Kanban worker setup on CT107: the bot's credentials, the
+# coder-claude-code worker profile and the Linear poller's env file. Imported from
+# tasks/main.yml after the NixOS rebuild (the profile is created with the hermes
+# CLI that build installs), and only when every vault_hermes_* variable below is
+# set; see vars/main.yml and the README.
+#
+# None of this needs a restart: the gh/claude wrappers read their token files on
+# every call, the dispatcher reads a profile's files each time it starts a
+# worker, and the poller reads its env file on each timer run. The Linear app
+# token is not deployed: the poller requests it from the client credentials.
+
+- name: Ensure the bot credentials directory exists
+  ansible.builtin.file:
+    path: "{{ hermes_kanban_credentials_dir }}"
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0700"
+
+- name: Install the bot credential files
+  ansible.builtin.copy:
+    content: "{{ item.value }}\n"
+    dest: "{{ hermes_kanban_credentials_dir }}/{{ item.name }}"
+    owner: hermes
+    group: hermes
+    mode: "0400"
+  loop:
+    - name: github-token
+      value: "{{ hermes_github_token }}"
+    - name: claude-code-oauth-token
+      value: "{{ hermes_claude_code_oauth_token }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: Install the bot git configuration
+  ansible.builtin.template:
+    src: gitconfig.j2
+    dest: /var/lib/hermes/.gitconfig
+    owner: hermes
+    group: hermes
+    mode: "0444"
+
+- name: Install the Linear poller environment file
+  ansible.builtin.template:
+    src: linear-poller.env.j2
+    dest: /var/lib/hermes/linear-poller.env
+    owner: hermes
+    group: hermes
+    mode: "0400"
+  no_log: true
+
+# Managed mode blocks `hermes setup` and `config set`, not `profile create`. The
+# profile.yaml it writes (with the description the Kanban orchestrator routes on)
+# is the marker that the profile exists; config.yaml and .env are replaced below.
+- name: Create the coder-claude-code worker profile
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - hermes
+      - --
+      - hermes
+      - profile
+      - create
+      - "{{ hermes_kanban_profile }}"
+      - --no-alias
+      - --description
+      - >-
+        Coding worker for Linear issues: opens GitHub pull requests as the bot
+        account, delegating code changes to Claude Code.
+    creates: "{{ hermes_kanban_profile_dir }}/profile.yaml"
+  environment:
+    HERMES_HOME: /var/lib/hermes/.hermes
+    HOME: /var/lib/hermes
+
+- name: Configure the worker profile
+  ansible.builtin.template:
+    src: profile-config.yaml.j2
+    dest: "{{ hermes_kanban_profile_dir }}/config.yaml"
+    owner: hermes
+    group: hermes
+    mode: "0640"
+
+# Only the GH_TOKEN line: the Linear poller owns the LINEAR_ACCESS_TOKEN line,
+# which changes whenever it renews the app token. GH_TOKEN is what the Kanban
+# completion gate uses to read the PR's required checks: it takes the assignee
+# profile's own login and refuses the ambient one. Commands the agent runs get
+# the same token from the gh wrapper instead, since Hermes strips it from their
+# environment.
+- name: Install the worker profile GitHub token
+  ansible.builtin.lineinfile:
+    path: "{{ hermes_kanban_profile_dir }}/.env"
+    regexp: "^GH_TOKEN="
+    line: "GH_TOKEN={{ hermes_github_token }}"
+    create: true
+    owner: hermes
+    group: hermes
+    mode: "0600"
+  no_log: true
+
+- name: Ensure the worker skill directory exists
+  ansible.builtin.file:
+    path: "{{ hermes_kanban_profile_dir }}/skills/linear-issue-worker"
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0750"
+
+- name: Install the linear-issue-worker skill
+  ansible.builtin.copy:
+    src: nixos/skills/linear-issue-worker/SKILL.md
+    dest: "{{ hermes_kanban_profile_dir }}/skills/linear-issue-worker/SKILL.md"
+    owner: hermes
+    group: hermes
+    mode: "0640"

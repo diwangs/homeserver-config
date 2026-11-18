@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   # Public identity, rendered from the vault by Ansible (templates/site.nix.j2)
@@ -23,6 +23,35 @@ let
   # environmentFiles as `str` rather than `path` precisely so this stays a runtime
   # path that the store never sees.
   secretsFile = "${stateDir}/secrets.env";
+
+  # ── Linear Kanban workers ────────────────────────────────────────────────
+  # Bot credentials, written by tasks/main.yml from the vault (0400, hermes).
+  # Files rather than environment variables: Hermes strips credentials from the
+  # environment of the commands an agent runs, so a token in an env var would
+  # not reach `gh` or `claude` inside a Kanban worker anyway.
+  credentialsDir = "${stateDir}/credentials";
+  # Per-issue clones the poller creates; each is one card's workspace.
+  workDir = "${stateDir}/work";
+  pollerEnvFile = "${stateDir}/linear-poller.env";
+
+  # gh and Claude Code read their tokens from the environment, so these wrappers
+  # take the place of the real binaries on the agent's PATH and export the token
+  # from its file first. An already-set variable wins, which keeps the Kanban
+  # completion gate's own GH_TOKEN (from the worker profile's .env) in charge.
+  gh = pkgs.writeShellScriptBin "gh" ''
+    if [ -z "''${GH_TOKEN:-}" ] && [ -r ${credentialsDir}/github-token ]; then
+      GH_TOKEN=$(cat ${credentialsDir}/github-token)
+      export GH_TOKEN
+    fi
+    exec ${pkgs.gh}/bin/gh "$@"
+  '';
+  claude = pkgs.writeShellScriptBin "claude" ''
+    if [ -z "''${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -r ${credentialsDir}/claude-code-oauth-token ]; then
+      CLAUDE_CODE_OAUTH_TOKEN=$(cat ${credentialsDir}/claude-code-oauth-token)
+      export CLAUDE_CODE_OAUTH_TOKEN
+    fi
+    exec ${pkgs.claude-code}/bin/claude "$@"
+  '';
 in
 {
   # Defaults are what we want: manageNetwork = false leaves systemd-networkd
@@ -88,6 +117,10 @@ in
     experimental-features = [ "nix-command" "flakes" ];
   };
 
+  # Claude Code is the only unfree package on this guest; allow it by name rather
+  # than flipping allowUnfree for the whole closure.
+  nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [ "claude-code" ];
+
   # ── Hermes Agent ──────────────────────────────────────────────────────────
   services.hermes-agent = {
     enable = true;
@@ -116,6 +149,11 @@ in
     # config_hermes.yml has written this file.
     environmentFiles = [ secretsFile ];
 
+    # On the agent's PATH (and the hermes user's profile) for Kanban workers. git
+    # is already there from the module. These are the credential wrappers above,
+    # not the bare packages, so the tools find the bot's tokens.
+    extraPackages = [ gh claude ];
+
     # The gateway process here serves the authenticated agent API only.
     environment = {
       API_SERVER_ENABLED = "true";
@@ -141,6 +179,14 @@ in
         # Existing ChatGPT subscription credentials remain on CT107.
         provider = "openai-codex";
         default = "gpt-6.1-sol";
+      };
+      # The gateway's built-in dispatcher starts a worker for each ready card.
+      # Two at a time is what 2 cores and 8 GiB can carry with Claude Code's Node
+      # process beside each Hermes worker. dispatch_profiles keeps this home from
+      # claiming cards for any other assignee.
+      kanban = {
+        max_in_progress = 2;
+        dispatch_profiles = [ "coder-claude-code" ];
       };
     };
 
@@ -215,6 +261,48 @@ in
           | ${pkgs.coreutils}/bin/cut -d' ' -f2- \
           | ${pkgs.findutils}/bin/xargs -r ${pkgs.coreutils}/bin/rm -f
       '';
+    };
+  };
+
+  # ── Linear poller ─────────────────────────────────────────────────────────
+  # Turns Linear issues delegated to the Hermes OAuth app into Kanban cards;
+  # see linear-poller.py. Polling, not a webhook: nothing on the internet can
+  # reach this container, and this keeps it that way. Inert until
+  # tasks/main.yml has written the poller's env file, which it does only once
+  # the app's client credentials are in the vault.
+  systemd.services.hermes-linear-poller = {
+    description = "Queue Linear issues as Hermes Kanban cards";
+    after = [ "network-online.target" "hermes-agent.service" ];
+    wants = [ "network-online.target" ];
+    unitConfig.ConditionPathExists = pollerEnvFile;
+    path = [ config.services.hermes-agent.package pkgs.git gh ];
+    environment = {
+      HERMES_HOME = hermesHome;
+      HOME = stateDir;
+      LINEAR_POLLER_STATE_DIR = stateDir;
+      LINEAR_POLLER_WORK_DIR = workDir;
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      User = "hermes";
+      Group = "hermes";
+      EnvironmentFile = pollerEnvFile;
+      ExecStart = "${pkgs.python3}/bin/python3 ${./linear-poller.py}";
+      ProtectSystem = "strict";
+      # Writes the board DB and the worker profile's .env under HERMES_HOME,
+      # the app token under credentialsDir and the clones under workDir.
+      ReadWritePaths = [ stateDir ];
+      PrivateTmp = true;
+      NoNewPrivileges = true;
+    };
+  };
+
+  systemd.timers.hermes-linear-poller = {
+    description = "Poll Linear for Hermes Kanban work";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitActiveSec = "2min";
     };
   };
 

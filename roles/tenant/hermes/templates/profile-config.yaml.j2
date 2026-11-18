@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# config.yaml of the coder-claude-code Kanban worker profile. Named profiles are
+# not covered by the NixOS module's settings, so Ansible owns this file and
+# rewrites it on every run.
+model:
+  # Keep in step with services.hermes-agent.settings.model in configuration.nix.
+  # The OpenAI Codex login is shared from the root profile's auth.json.
+  provider: openai-codex
+  default: gpt-6.1-sol
+mcp_servers:
+  linear:
+    url: https://mcp.linear.app/mcp
+    headers:
+      # Resolved from this profile's .env when the server connects. The Linear
+      # poller keeps LINEAR_ACCESS_TOKEN there current (it is the Hermes app's
+      # token, so the worker acts in Linear as the app).
+      Authorization: "Bearer ${LINEAR_ACCESS_TOKEN}"

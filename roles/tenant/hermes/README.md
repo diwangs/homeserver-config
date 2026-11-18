@@ -153,3 +153,108 @@ its `.env` again contains the Matrix token and restart `hermes-agent`. The
 pre-split Matrix directory and `/var/lib/hermes/matrix-pre-split.tar` remain on
 CT107 until the new gateway has been verified. Do not copy a newer CT108 crypto
 store back while either gateway is running.
+
+## Linear Kanban workers
+
+CT107 turns Linear issues into GitHub pull requests with Hermes Kanban. Every
+two minutes the `hermes-linear-poller` timer asks Linear for the issues delegated
+to the Hermes Linear app that are not completed or canceled. For each new one it
+clones the target repository into `/var/lib/hermes/work/<ISSUE-ID>` and
+creates a Kanban card. The gateway's built-in dispatcher then starts the
+`coder-claude-code` worker profile on the card. The worker follows
+`files/nixos/skills/linear-issue-worker/SKILL.md`: it delegates the change to
+Claude Code (`claude -p`), pushes a branch `hermes/<issue-id>`, opens a PR as
+the GitHub bot account, and updates the Linear issue through Linear's MCP
+server. The card can close only once the PR's required checks pass. That is the
+Kanban completion gate, which needs at least one required check on the
+repository. The poller only reads Linear. CT107 still accepts no traffic from the
+internet.
+
+### Conventions in Linear
+
+- **Pick-up:** pick the Hermes app in the issue's assignee menu. That makes the
+  app the issue's *delegate*; the person assigned stays the assignee. The worker
+  moves the issue to the team's first started state (*In Progress*), then to
+  *In Review* with the PR link, and comments when it is blocked.
+- **Target repository:** one Linear project maps to one repository, through a
+  project label (a label on the project, not the issue): either a label named
+  `OWNER/NAME` inside a project label group called `repo`, or a label named
+  `repo:OWNER/NAME`. Issues outside a project, or in a project that names no
+  repository or more than one, are skipped with a line in the poller's journal.
+- An issue is queued once. The poller records it in
+  `/var/lib/hermes/linear-poller-state.json`, and the card's idempotency key is
+  derived from the issue id, so moving an issue back to Todo or delegating it
+  again does not create a second card. Use
+  `hermes kanban unblock` or `reopen-review` on the existing card instead.
+
+### Accounts and secrets
+
+The secrets live in the vault, as inline-vault variables in
+`group_vars/all/hermes_kanban.yml`. The bot's commit identity is plain
+`hermes_github_name` / `hermes_github_email` in the same file.
+`tasks/linear_kanban.yml` is skipped until all of these are set:
+
+| Variable | Value |
+|---|---|
+| `vault_hermes_github_token` | Fine-grained PAT of the GitHub bot account, limited to the repositories it may work on. Repository permissions: Contents read/write, Pull requests read/write, Checks read, Commit statuses read, Metadata read, Administration read (the completion gate reads branch protection) |
+| `vault_hermes_linear_client_id`, `vault_hermes_linear_client_secret` | Client credentials of the Hermes Linear OAuth app (see below) |
+| `vault_hermes_claude_code_oauth_token` | Output of `claude setup-token`, run once on any machine signed in to the Claude subscription |
+
+### The Linear app
+
+Hermes is a Linear OAuth application installed with the app actor, so it shows
+up and acts as its own app user, which takes no seat. A workspace admin creates
+it under Settings → API → OAuth applications:
+
+- **Redirect URI:** `http://localhost/callback`. The form requires one, but the
+  client-credentials grant never uses it.
+- **Client credentials:** on.
+- **Webhooks / Agent session events:** off. Agent sessions expect a webhook
+  receiver that answers within seconds, and CT107 has none; with them on, every
+  delegation would show an unresponsive session.
+
+The poller requests the app's token with the client-credentials grant and the
+scopes `read,write,app:assignable`. The first such request installs the app in
+the workspace; only then does it appear in assignee menus. The token lasts 30
+days, has no refresh token, and is cached in
+`/var/lib/hermes/credentials/linear-token.json`; the poller requests a new one a
+week before expiry or when Linear rejects the old one, and writes it to the
+worker profile's `.env` as `LINEAR_ACCESS_TOKEN` for the Linear MCP server.
+Keep the scope set unchanged: requesting a different one revokes the app's
+other tokens. The app sees every public team. Grant it private teams on its
+page in Linear.
+
+The bot GitHub account's repository access is the real allowlist. A repository
+label naming a repository the bot cannot read fails at the clone step.
+
+The tokens are written to `/var/lib/hermes/credentials/` (0400). The `gh` and
+`claude` on the agent's PATH are wrappers from `configuration.nix` that export the
+token from there. Hermes strips credentials from the environment of commands an
+agent runs, so a plain environment variable would not reach them. The worker
+profile's own files (`$HERMES_HOME/profiles/coder-claude-code/{config.yaml,.env}`)
+and the poller's `/var/lib/hermes/linear-poller.env` are rewritten by Ansible on
+every run, except the profile `.env`'s `LINEAR_ACCESS_TOKEN` line, which belongs to
+the poller. The profile `.env` carries `GH_TOKEN` because the completion gate uses
+the assignee profile's own GitHub login, never the ambient one. The worker's
+model is the root profile's OpenAI Codex login, which named profiles share.
+
+Deploy with `ansible-playbook playbooks/configure.yml --limit hermes`.
+
+### Checks and troubleshooting
+
+As the `hermes` user on CT107 (`pct enter 107`, then `runuser -u hermes -- bash`):
+
+~~~sh
+hermes profile list                       # coder-claude-code is present
+gh auth status                            # signed in as the bot
+claude -p 'reply with ok'                 # Claude Code subscription sign-in works
+hermes -p coder-claude-code mcp list      # linear is connected
+hermes kanban list                        # cards created by linear-poller
+hermes kanban tail <card id>              # follow one worker
+hermes kanban diagnostics                 # stranded or stuck cards
+~~~
+
+`journalctl -u hermes-linear-poller` shows each pass: the cards it created and
+the issues it skipped and why. Clones of cards finished more than seven days ago
+are removed by the poller. At most two cards run at once (`kanban.max_in_progress`),
+and the 8 GiB memory limit is the reason.
