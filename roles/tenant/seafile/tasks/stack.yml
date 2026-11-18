@@ -33,8 +33,6 @@
     label: "{{ item.unit }}"
 
 # `start` returns once the unit's pre-start checks pass, i.e. once MariaDB is healthy.
-# With seafile_start_app=false (migration) the application stays down until the dump
-# has been restored; see README.
 - name: Start the Seafile application
   ansible.builtin.systemd_service:
     name: "{{ item.unit }}"
@@ -48,4 +46,3 @@
       restart: false
   loop_control:
     label: "{{ item.unit }}"
-  when: seafile_start_app | bool

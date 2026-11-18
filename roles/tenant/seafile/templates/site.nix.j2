@@ -13,5 +13,4 @@
   caddyImage = {{ seafile_caddy_image | to_json }};
   dbUsername = {{ seafile_db_username | to_json }};
   timeZone = {{ seafile_time_zone | to_json }};
-  startApp = {{ 'true' if seafile_start_app | bool else 'false' }};
 }

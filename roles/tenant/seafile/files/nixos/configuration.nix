@@ -106,9 +106,8 @@ let
 
   # Fields shared by every container: private bridge, restart handled by systemd
   # (Restart=on-failure from the oci-containers module), logs to Docker's rotated
-  # json-file store (see daemon settings) rather than the journal. The database and
-  # cache always start; the application pair is held back while site.startApp is false
-  # (a migration restores the dump into the empty database first, see README).
+  # json-file store (see daemon settings) rather than the journal. The whole stack
+  # autostarts with the guest.
   common = {
     log-driver = "json-file";
     networks = [ network.name ];
@@ -238,7 +237,6 @@ in
     # After that, change the admin password in the web UI; changing it does nothing.
     seafile = common // {
       image = "seafileltd/seafile-mc:${site.seafileVersion}";
-      autoStart = site.startApp;
       dependsOn = [
         dbHost
         redisHost
@@ -283,7 +281,6 @@ in
     # guest's dmz GUA is what ddns publishes. No UDP/443: the IPv4 proxy is TCP-only.
     seafile-caddy = common // {
       image = site.caddyImage;
-      autoStart = site.startApp;
       dependsOn = [ "seafile" ];
       ports = [
         "80:80"

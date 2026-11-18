@@ -19,8 +19,7 @@ Seafile Community Edition on LXC 109, in the dmz (VLAN 6), publicly reachable at
 
 ## This guest is NixOS
 
-It follows the `matrix` tenant's architecture (see `roles/tenant/matrix/README.md`), not the
-Debian + `docker_host` pattern it started with:
+It follows the `matrix` tenant's architecture (see `roles/tenant/matrix/README.md`):
 
 - **The image is the configuration.** `files/nixos/` holds the flake and its committed
   `flake.lock` (the same nixpkgs / nixos-generators pins as matrix). `tasks/build_template.yml`
@@ -32,7 +31,7 @@ Debian + `docker_host` pattern it started with:
   the containers are all in `configuration.nix`. In-guest work is `tasks/main.yml` via
   `playbooks/configure.yml`: install the runtime credentials, copy the flake to `/etc/nixos`,
   `nixos-rebuild switch --flake /etc/nixos#seafile --no-update-lock-file`, start the stack.
-- **The dist-upgrade tooling does not apply** (`playbooks/upgrade_lxc_dist.yml` is Debian-only).
+- **The dist-upgrade tooling does not apply** (`playbooks/upgrade_lxc_dist.yml` targets Debian guests).
   Upgrade nixpkgs by bumping `flake.lock`, Seafile by bumping `seafile_version`, and re-running
   `playbooks/configure.yml`.
 - `group_vars/lxc_nixos.yml` pins `ansible_python_interpreter` to the system profile, and the
@@ -101,7 +100,7 @@ Deliberate deviations from upstream:
 
 Nothing is invented or committed. The role refuses to run (`tasks/validate.yml`, before
 any change in the guest) unless `group_vars/all/vault.yml` — **not edited by this repo
-change** — contains these entries (names unchanged from the Debian version). Add them with
+change** — contains these entries. Add them with
 `ansible-vault edit group_vars/all/vault.yml`:
 
 | Vault variable | Requirement |
@@ -179,9 +178,9 @@ every earlier dump untouched. **Scope decision, as for Immich: no off-pool copy.
 The dump and `/shared` share one RAID-Z pool; add a borg/rsync job if that is not enough.
 
 Consistent restore (per Seafile's backup docs the DB is dumped *before* data is copied, so
-the DB never references blocks the data copy lacks): stop `docker-seafile` and `docker-seafile-caddy`
-(or deploy with `-e seafile_start_app=false`), restore the data dir to `/mnt/seafile`, load the dump
-into `seafile-mysql` (see "Restore the database" below), start the containers. Test a restore before
+the DB never references blocks the data copy lacks): stop `docker-seafile` and `docker-seafile-caddy`,
+restore the data dir to `/mnt/seafile`, load the dump into `seafile-mysql` (see "Restore the database"
+below), start the containers. Test a restore before
 relying on it.
 
 ## First run (new guest, no existing data)
@@ -204,54 +203,13 @@ relying on it.
 7. Confirm the first dump: `systemctl start seafile-db-dump` and check `/mnt/seafile-backup`.
 8. In the admin UI, disable public registration and review upload limits before inviting users.
 
-## Migrating the existing Debian CT109 to NixOS
+## Restoring from backup
 
-**Nothing here has been run, and the live CT109 state has not been inspected.** If the earlier Debian
-configuration was deployed, use this operator-run migration procedure. A new deployment instead follows
-"First run" above. Recreating the CT
-destroys its rootfs, i.e. the `seafile_db` volume (the MariaDB files) and the `seafile_caddy_data`
-volume. Everything on `/mnt/seafile` and `/mnt/seafile-backup` is a bind mount of ZFS directories on
-the host and survives; the database comes back from the SQL dump. Plan for downtime (Seafile is
-unavailable from step 1 until step 9).
-
-Use the **same vault values** as the running Debian deployment: `seafile.conf` and `seahub_settings.py`
-inside `/mnt/seafile/seafile/conf` already contain the DB password and JWT key, and rotating them mid-migration
-would break the restored data.
-
-1. **Quiesce and take a last dump** (on CT109): `docker stop seafile-caddy seafile`, then
-   `systemctl start seafile-db-dump` (the Debian unit is still installed) and confirm a fresh
-   `seafile-db-*.sql.gz` appeared in `/mnt/seafile-backup` (`gzip -t` it). Note its name. Then
-   `docker stop seafile-mysql`.
-2. **Safety copies on sentinel-lp**: snapshot the ZFS datasets behind `/mnt/frontpanel-pool/frontpanel-dataset/Seafile`
-   and `.../Backup/seafile` (`zfs list` shows them), and optionally `vzdump 109` (rootfs only; bind mounts
-   are excluded) so the old guest can be restored. Optionally keep the TLS state to avoid re-issuing:
-   `tar -C /var/lib/docker/volumes/seafile_caddy_data/_data -czf /mnt/seafile-backup/caddy-data.tgz .`
-   (on CT109, before destroying it).
-3. **Router first**: `ansible-playbook playbooks/configure.yml --limit prydwen` writes the pinned
-   DUID/IAID reservation (and leaves ddns as is).
-4. **Destroy the Debian guest**: `pct stop 109 && pct destroy 109` on sentinel-lp. Do **not** pass `--purge`
-   or `--destroy-unreferenced-disks`. Check `pct config 109` showed `mp0`/`mp1` as host paths (bind mounts),
-   not storage volumes, before doing this.
-5. **Create the NixOS guest**: `ansible-playbook playbooks/init_proxmox.yml --limit sentinel-lp` (builds the
-   template, recreates CT109 with the same MAC, mounts and vmid), then `ansible seafile -m ping`.
-6. **Bring up only the database**: `ansible-playbook playbooks/configure.yml --limit seafile -e seafile_start_app=false`.
-   MariaDB and Redis start; `seafile` and `seafile-caddy` stay down, so Seafile cannot initialise
-   an empty database over your restored `/shared`. (Optionally restore `caddy-data.tgz` into
-   `/var/lib/docker/volumes/seafile_caddy_data/_data` first, creating the volume with `docker volume create`.)
-7. **Restore the database** (below).
-8. `ansible-playbook playbooks/configure.yml --limit seafile` (without the override) starts `seafile` and
-   `seafile-caddy`.
-9. **Verify**: ddns publishes the new lease's AAAA; `docker logs seafile`, `docker logs seafile-caddy`;
-   sign in, open a library, download a file; `systemctl start seafile-db-dump` produces a dump from the new
-   database. Only then remove the safety copies.
-
-The IPv4 side (Fly proxy, `A` record) and the Cloudflare `AAAA` record are unchanged.
-Rollback before step 8: re-create the Debian CT from the `vzdump` and restore the snapshot if the data
-dir was touched; after step 8 treat the NixOS guest as the source of truth.
+To restore into a freshly created guest, stop the stack first so Seafile cannot write while data and database are swapped (`systemctl stop docker-seafile-caddy docker-seafile`), restore the data dir to `/mnt/seafile` and load the dump (below), then start the stack again (`systemctl start docker-seafile docker-seafile-caddy`, or re-run `playbooks/configure.yml --limit seafile`).
 
 ### Restore the database
 
-Inside CT109 (`pct enter 109`), with the dump from step 1. The fresh MariaDB has no `seafile` account
+Inside CT109 (`pct enter 109`), with the stack stopped except `seafile-mysql`, and a dump from `/mnt/seafile-backup`. The fresh MariaDB has no `seafile` account
 (Seafile's own first-run script creates it, and it will not run against an existing `/shared`), so create
 it with the vault's `vault_seafile_db_password`, then load the dump:
 
@@ -271,8 +229,7 @@ zcat /mnt/seafile-backup/seafile-db-<timestamp>.sql.gz \
 
 The dump was made with `--databases`, so it contains the `CREATE DATABASE` statements. Grants and users
 are not part of it, hence the first block. This path is documented from Seafile's and MariaDB's behaviour and
-is **untested here** — rehearse it (for instance on a scratch container from the dump) before the real
-cut-over. If the restored application cannot log in to the database, compare the `seafile` account's
+is **untested here** — rehearse it (for instance on a scratch container from the dump) before relying on it. If the restored application cannot log in to the database, compare the `seafile` account's
 grants (`SHOW GRANTS FOR 'seafile'@'%'`) with what `seafile.conf` expects.
 
 ## Tests
@@ -283,7 +240,7 @@ All offline; none touch a host, the vault or the network once the Nix inputs are
   DUID/IAID in `configuration.nix` equal to the router reservation, the matrix-shaped flake/lock/build_template
   contract, mount paths agreeing between `host_vars`, `vars/main.yml` and Nix, secrets confined to the two
   root-only env templates (no secret name in anything the flake or image sees), image pins, vault variable
-  names unchanged, no obsolete Debian/`docker_container` tasks, no real domain committed.
+  names unchanged, no `docker_container`/apt tasks, no real domain committed.
 - `tests/test_db_dump.py` — runs `files/nixos/seafile-db-dump.sh` with mocked `docker` and `mountpoint`:
   a failed, partial, truncated or gzip-corrupt dump publishes and prunes nothing, a good one is published and
   retention applied, and a missing mount is refused before the database is touched.

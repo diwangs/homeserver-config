@@ -32,16 +32,15 @@ SITE = """{
   caddyImage = "caddy:2";
   dbUsername = "seafile";
   timeZone = "America/New_York";
-  startApp = %s;
 }
 """
 FLAKE_ARGS = ["--no-update-lock-file", "--extra-experimental-features", "nix-command flakes"]
 
 
-def stage(start_app="true"):
+def stage():
     tmp = tempfile.TemporaryDirectory()
     shutil.copytree(NIX_DIR, tmp.name, dirs_exist_ok=True)
-    (Path(tmp.name) / "site.nix").write_text(SITE % start_app)
+    (Path(tmp.name) / "site.nix").write_text(SITE)
     return tmp
 
 
@@ -183,16 +182,13 @@ class NixosConfig(unittest.TestCase):
         self.assertEqual(svc["SEAFILE_BACKUP_DIR"], "/mnt/seafile-backup")
         self.assertEqual(svc["SEAFILE_BACKUP_KEEP"], "14")
 
-    def test_hold_back_application_for_migration(self):
-        tmp = stage("false")
-        self.addCleanup(tmp.cleanup)
-        attr = f"path:{tmp.name}#nixosConfigurations.seafile.config"
-        want = lambda n: self.eval(f'systemd.services."docker-{n}".wantedBy', attr)  # noqa: E731
-        self.assertEqual(want("seafile-mysql"), ["multi-user.target"])
-        self.assertEqual(want("seafile-redis"), ["multi-user.target"])
-        self.assertEqual(want("seafile"), [])
-        self.assertEqual(want("seafile-caddy"), [])
-        self.assertEqual(self.eval('systemd.services."docker-seafile".wantedBy'), ["multi-user.target"])
+    def test_all_containers_autostart(self):
+        names = ("seafile-mysql", "seafile-redis", "seafile", "seafile-caddy")
+        self.assertEqual(sorted(self.containers), sorted(names))
+        for n in names:
+            self.assertEqual(
+                self.eval(f'systemd.services."docker-{n}".wantedBy'), ["multi-user.target"], n
+            )
 
     def unit(self, name):
         return self.eval(f'systemd.units."{name}".text')

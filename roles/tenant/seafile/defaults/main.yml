@@ -18,9 +18,3 @@ seafile_caddy_image: caddy:2
 
 seafile_db_username: seafile
 seafile_time_zone: America/New_York
-
-# false keeps the application containers (seafile, seafile-caddy) stopped and not
-# enabled, while MariaDB and Redis run. Only for the Debian -> NixOS migration, which
-# has to restore the SQL dump into the empty database before Seafile first starts:
-#   ansible-playbook playbooks/configure.yml --limit seafile -e seafile_start_app=false
-seafile_start_app: true

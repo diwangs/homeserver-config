@@ -151,6 +151,15 @@ class SeafileWiring(unittest.TestCase):
                 self.assertNotIn("apt", module.split(".")[-1:])
         self.assertNotIn("seafile", load("group_vars/lxc_nixos.yml") or {})
 
+    def test_no_start_app_knob_remains(self):
+        for path in ROLE.rglob("*"):
+            if not path.is_file() or "tests" in path.relative_to(ROLE).parts or "__pycache__" in path.parts:
+                continue
+            text = path.read_text()
+            for removed in ("seafile_start_app", "startApp", "site.startApp"):
+                self.assertNotIn(removed, text, f"{removed} in {path.relative_to(ROLE)}")
+        self.assertNotIn("autoStart", config_nix())
+
     def test_mount_paths_agree_between_lxc_and_nix(self):
         lines = {c["key"]: c for c in load("host_vars/seafile.yml")["proxmox_lxc"]["config_lines"]}
         vars_ = load("roles/tenant/seafile/vars/main.yml")
@@ -262,7 +271,7 @@ class SeafileWiring(unittest.TestCase):
             self.assertNotIn("latest", image)
         self.assertIn('"seafileltd/seafile-mc:${site.seafileVersion}"', config_nix())
         self.assertNotIn("latest", config_nix().replace("# ", ""))
-        self.assertTrue(d["seafile_start_app"])
+        self.assertNotIn("seafile_start_app", d)
 
     def test_vault_variable_names_unchanged(self):
         vault_names = set(re.findall(r"vault_seafile_\w+", (ROLE / "vars/main.yml").read_text()))
@@ -274,7 +283,6 @@ class SeafileWiring(unittest.TestCase):
         stack = (ROLE / "tasks/stack.yml").read_text()
         self.assertIn("mountpoint -q {{ seafile_data_dir }}", stack)
         self.assertIn("mountpoint -q {{ seafile_backup_dir }}", stack)
-        self.assertIn("seafile_start_app | bool", stack)
         self.assertIn("_before.stat.exists", stack)
 
     def test_no_real_domain_or_inline_secret_committed(self):
