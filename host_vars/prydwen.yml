@@ -642,6 +642,19 @@ prydwen_uci_sections:
       hostid: "29"
       duid: ["00020000ab116865726d6777006c%686d6777"]
       mac: ["BC:24:11:6C:29:01"]
+  # Public Seafile tenant (CT109, dmz). Assigned, not discovered, like matrix: the
+  # guest is NixOS and pins this exact DUID/IAID in its image
+  # (roles/tenant/seafile/files/nixos/configuration.nix), so this lease can be written
+  # before the container has ever booted. hwaddr is pinned in host_vars/seafile.yml.
+  - config: dhcp
+    type: host
+    name: host_seafile
+    find: { name: seafile }
+    value:
+      leasetime: 10m
+      hostid: "2a"
+      duid: ["00020000ab1173656166696c006d%73656166"]
+      mac: ["BC:24:11:5A:F1:09"]
   - config: dhcp
     type: host
     name: host_vertibird_ap_v6
@@ -945,6 +958,31 @@ prydwen_uci_sections:
       ip_script: >-
         /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
         \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='hermes-gateway']['ipv6-addr'][0]['address']\""
+      interface: wan
+      use_syslog: "2"
+      check_unit: minutes
+      force_unit: minutes
+      retry_unit: seconds
+  # Publishes the seafile LXC's current dmz GUA as seafile_hostname (AAAA). IPv4
+  # clients reach it through the shared extern/ipv4-proxy Fly app (A record, manual).
+  - config: ddns
+    type: service
+    name: seafile
+    find: { lookup_host: "{{ seafile_hostname }}" }
+    secret: true
+    value:
+      service_name: cloudflare.com-v4
+      use_ipv6: "1"
+      enabled: "1"
+      domain: "seafile.us@{{ public_domain }}"
+      username: Bearer
+      password: "{{ prydwen_cloudflare_api_token }}"
+      use_https: "1"
+      cacert: /etc/ssl/certs
+      ip_source: script
+      ip_script: >-
+        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='seafile']['ipv6-addr'][0]['address']\""
       interface: wan
       use_syslog: "2"
       check_unit: minutes

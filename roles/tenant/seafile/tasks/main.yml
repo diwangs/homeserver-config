@@ -1,0 +1,29 @@
+---
+# Reconcile the running Seafile guest. Runs in-guest via `pct exec` through the Proxmox
+# host (group_vars/tenant_lxc.yml), from playbooks/configure.yml.
+#
+# NixOS is declarative, so instead of the Debian roles' apt/docker task chain there is
+# one flake tree and one `nixos-rebuild`. The same tree built the image
+# (tasks/build_template.yml), so a rebuild here converges on exactly what the template
+# already contains until the flake is edited. The Docker engine, the seafile-net
+# bridge, the four containers (virtualisation.oci-containers) and the nightly SQL dump
+# all live in files/nixos/configuration.nix.
+#
+# Storage is not mounted here: the data and backup directories are host bind-mounts
+# provided at the LXC level (see host_vars/seafile.yml).
+#
+# No Portainer, unlike the other Docker tenants: this guest is publicly reachable
+# and Portainer would add an admin surface holding the Docker socket.
+- name: Validate Seafile inputs
+  ansible.builtin.import_tasks: validate.yml
+
+# Before the rebuild: the container units skip themselves (ConditionPathExists) until
+# these files exist, so the credentials must be in place when the stack first starts.
+- name: Install the Seafile runtime credentials
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Deploy the Seafile NixOS configuration
+  ansible.builtin.import_tasks: nixos.yml
+
+- name: Start the Seafile stack
+  ansible.builtin.import_tasks: stack.yml

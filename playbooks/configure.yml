@@ -76,6 +76,11 @@
   roles:
     - role: hermes_gateway
 
+- name: Configure Seafile tenant
+  hosts: seafile
+  roles:
+    - role: seafile
+
 - name: Baseline for the Debian guests
   hosts: tenant_lxc:!lxc_nixos
   roles:

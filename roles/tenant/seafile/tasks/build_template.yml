@@ -1,0 +1,103 @@
+---
+# Invoked by roles/host/proxmox_lxc (template_role in host_vars) right before the
+# container is created; sets proxmox_lxc_built_template, the uploaded filename.
+#
+# Build the NixOS LXC template and upload it to Proxmox, exactly as roles/tenant/matrix
+# does: the image *is* the configuration here, so there is no `pveam` template
+# (roles/host/proxmox_templates). The image carries the pinned DHCPv6 DUID/IAID, so the
+# router reservation can be written before the guest first boots.
+#
+# The build runs on the workstation (delegate_to: localhost), not on the Proxmox
+# host, which has no Nix. The flake tree is copied to a temp dir and built as a
+# `path:` flake: building `.#` inside the git repo would silently ignore untracked
+# or uncommitted files.
+# Copying the committed flake.lock along keeps the build pinned.
+
+- name: Create a temporary flake build directory
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: seafile-nixos
+  register: seafile_build_dir
+  delegate_to: localhost
+  changed_when: false
+
+- name: Stage the static flake tree
+  ansible.builtin.copy:
+    src: nixos/
+    dest: "{{ seafile_build_dir.path }}/"
+    mode: "0644"
+  delegate_to: localhost
+  changed_when: false
+
+# site.nix carries the public identity (hostname, ACME contact) from the
+# vault plus the pinned image tags; it holds no secret (the build output goes into
+# /nix/store and the template) and is not committed, so it is rendered beside the static tree.
+- name: Render the public identity module
+  ansible.builtin.template:
+    src: site.nix.j2
+    dest: "{{ seafile_build_dir.path }}/site.nix"
+    mode: "0644"
+  delegate_to: localhost
+  changed_when: false
+
+# --no-update-lock-file: fail rather than silently resolving a newer nixpkgs. The
+# lock is the pin; tracking FlakeHub's "0.1" (newest unstable) would otherwise mean
+# a different nixpkgs on every build.
+- name: Build the Proxmox LXC tarball
+  ansible.builtin.command:
+    cmd: >-
+      nix build
+      --no-update-lock-file
+      --no-link
+      --print-out-paths
+      "path:{{ seafile_build_dir.path }}#packages.x86_64-linux.proxmox-lxc"
+  register: seafile_nix_build
+  delegate_to: localhost
+  changed_when: false
+
+# The generator emits <out>/tarball/nixos-image-lxc-proxmox-<version>-<system>.tar.xz,
+# so this has to recurse — the store path root holds only nix-support/ and tarball/.
+- name: Locate the built tarball
+  ansible.builtin.find:
+    paths: "{{ seafile_nix_build.stdout_lines | last }}"
+    patterns: "*.tar.xz"
+    recurse: true
+  register: seafile_tarball
+  delegate_to: localhost
+  changed_when: false
+  failed_when: seafile_tarball.files | length != 1
+
+# Proxmox parses vztmpl names as <name>_<version>_<arch>. The NixOS version
+# (e.g. 26.11.20260828.83199d0) shows which nixpkgs a template came from, but it
+# tracks flake.lock alone — editing configuration.nix produces a different image
+# under an identical version. The store hash is appended so every distinct build
+# gets its own filename, and a rebuild lands beside the template a running CT was
+# created from rather than overwriting it.
+- name: Derive the template filename
+  ansible.builtin.set_fact:
+    seafile_template_version: >-
+      {{ seafile_tarball.files[0].path | basename
+         | regex_replace('^nixos-image-lxc-proxmox-(.+)-[^-]+-linux\.tar\.xz$', '\1') }}
+    seafile_template_build: >-
+      {{ (seafile_nix_build.stdout_lines | last | basename).split('-') | first | truncate(8, true, '') }}
+
+- name: Set the template filename
+  # proxmox_lxc_built_template is the contract with roles/host/proxmox_lxc, hence its prefix.
+  ansible.builtin.set_fact: # noqa: var-naming[no-role-prefix]
+    proxmox_lxc_built_template: "nixos-seafile_{{ seafile_template_version }}.{{ seafile_template_build }}_amd64.tar.xz"
+  failed_when: seafile_template_version == (seafile_tarball.files[0].path | basename)
+
+- name: Upload the template to Proxmox
+  ansible.builtin.copy:
+    src: "{{ seafile_tarball.files[0].path }}"
+    dest: "/var/lib/vz/template/cache/{{ proxmox_lxc_built_template }}"
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: Remove the temporary flake build directory
+  ansible.builtin.file:
+    path: "{{ seafile_build_dir.path }}"
+    state: absent
+  delegate_to: localhost
+  changed_when: false

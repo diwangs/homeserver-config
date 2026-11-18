@@ -12,6 +12,7 @@ http {
   # AAAA record so the ACME challenge reaches CT108 instead of looping here.
   map $host $acme_origin {
     hermes.example.org hermes.example.org:80;
+    seafile.us.example.org seafile.us.example.org:80;
     default "";
   }
 
@@ -43,6 +44,7 @@ stream {
     nextcloud.example.org   nextcloud.example.org:443;
     matrix.example.org   matrix.example.org:443;
     hermes.example.org   hermes.example.org:443;
+    seafile.us.example.org   seafile.us.example.org:443;
     # Anything else — no SNI, or a hostname not listed above — is sent to a closed
     # local port rather than silently falling back to one tenant's backend. nginx
     # gets an instant ECONNREFUSED and resets the client; nothing is forwarded.
