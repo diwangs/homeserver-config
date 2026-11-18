@@ -1,0 +1,27 @@
+# Lint every pull request into main. This is also the required status check
+# that the Hermes Kanban completion gate waits for before it closes a card
+# (roles/tenant/hermes/README.md, "Linear Kanban workers"). No push trigger:
+# direct pushes to main don't run it, and the ruleset that requires the check
+# lets repository admins bypass it.
+name: lint
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ansible-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Same version as the local toolchain, so CI and local runs agree.
+      - run: pip install ansible-lint==25.8.2
+      # Roles from Galaxy (e.g. geerlingguy.hdparm) that playbooks import.
+      - run: ansible-galaxy install -r requirements.yml
+      - run: ansible-lint
