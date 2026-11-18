@@ -1,0 +1,18 @@
+---
+# Mutable in-tenant config: the Docker application stack. Re-runnable; driven by
+# playbooks/configure.yml. The Docker engine and networks come from
+# roles/common/docker_host (playbooks/init_tenant.yml).
+#
+# Storage is not mounted here: the data and backup directories are host
+# bind-mounts provided at the LXC level (see host_vars/seafile.yml).
+#
+# No Portainer, unlike the other Docker tenants: this guest is publicly reachable
+# and Portainer would add an admin surface holding the Docker socket.
+- name: Validate Seafile inputs
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Set up Seafile
+  ansible.builtin.import_tasks: seafile.yml
+
+- name: Set up the Seafile database backup
+  ansible.builtin.import_tasks: backup.yml

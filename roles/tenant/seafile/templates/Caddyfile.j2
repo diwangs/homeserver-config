@@ -1,0 +1,11 @@
+# Managed by Ansible (roles/tenant/seafile).
+# TLS terminates here: Caddy obtains and renews the certificate itself (ACME
+# HTTP-01 / TLS-ALPN-01, both reach this guest directly or through the IPv4 proxy,
+# which passes TLS through). Seafile's own nginx stays plain HTTP on seafile-net.
+{
+	email {{ acme_email }}
+}
+
+{{ seafile_hostname }} {
+	reverse_proxy seafile:80
+}

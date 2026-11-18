@@ -1,0 +1,64 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 109
+  hostname: seafile
+  # Newest Debian 13 (Trixie), resolved + downloaded by roles/host/proxmox_templates.
+  template: debian13
+  # Docker images (~2 GB), MariaDB, Caddy state. Library blocks live on ZFS (mp0).
+  # Grow later with `pct resize 109 rootfs +NG`.
+  disk: local-lvm:32
+  cores: 2
+  memory: 4096 # headroom over upstream's currently recommended 2 GB for server + MariaDB + cache
+  swap: 1024
+  netif:
+    # dmz (VLAN 6) — the zone is already forwarded from wan (see host_vars/prydwen.yml
+    # forward_wan_dmz), so a public service needs no per-service firewall rule.
+    # ip6=manual: ifupdown only brings eth6 up; systemd-networkd owns addressing
+    # (DHCPv6 + RA), deployed host-side via networkd_interfaces below — Docker makes
+    # this a forwarding host, so the kernel ignores RAs (docker/for-linux#844).
+    # hwaddr is pinned so the router's lease (matched on mac as well as duid) stays
+    # valid if the container is ever recreated.
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual,hwaddr=BC:24:11:5A:F1:09"
+  unprivileged: true
+  features:
+    - nesting=1 # Required to run docker
+    # No fuse: no borg job; backup scope is the nightly DB dump onto the pool (see README).
+  # Library data and DB dumps on the encrypted RAID-Z pool. No idmap: the Seafile
+  # image runs as container root, which an unprivileged CT maps to host uid 100000,
+  # so these are owned by that uid (hermes-gateway's pattern).
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Seafile
+      owner: "100000"
+      group: "100000"
+      mode: "0750"
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Backup/seafile
+      owner: "100000"
+      group: "100000"
+      mode: "0750"
+  config_lines:
+    # at_create: present at first boot, so no `pct reboot` is needed.
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Seafile,mp=/mnt/seafile
+      at_create: true
+    - key: mp1
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Backup/seafile,mp=/mnt/seafile-backup
+      at_create: true
+  # The ::2a address (inventory ansible_host) comes from the router's DHCPv6
+  # reservation, keyed to this guest's DUID + IAID.
+  networkd_interfaces: [eth6]
+# roles/common/docker_host. The stack runs on a bridge with 80/443 published on the
+# guest's own addresses. NAT66 requires Docker's ip6tables and an IPv6-enabled bridge.
+docker_host_ip6tables: true
+# Name is fixed by upstream's compose files (seafile-net).
+docker_host_bridge_network:
+  name: seafile-net
+  subnet: fd00:5ea4:11::/64 # container-internal, NAT66'd to host
+# Required by roles/common/docker_host but unused here (no container joins it).
+# NOT 30 - 39: nextcloud's docker daemon assigns from that range on this same VLAN.
+docker_host_ipvlan_network:
+  name: dmz
+  parent: eth6
+  subnet: fd5a:715f:1edc:a706::/64
+  gateway: fd5a:715f:1edc:a706::1
+  iprange: fd5a:715f:1edc:a706::50/124 # 50 - 5f

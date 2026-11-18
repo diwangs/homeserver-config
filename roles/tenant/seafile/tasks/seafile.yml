@@ -1,0 +1,155 @@
+---
+# The Seafile CE stack: db, cache, server, TLS front — one docker_container task
+# each (repo idiom). Upstream ships docker-compose (docker/ce/{.env,seafile-server.yml});
+# compare those at the pinned version when upgrading. Deliberate deviations from
+# upstream are called out inline.
+
+- name: Ensure the Seafile config directory exists
+  ansible.builtin.file:
+    path: /opt/seafile
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# mp0 only exists if the LXC was created with it; without the mount, Docker would
+# silently create the bind source on the rootfs and the library would land there.
+- name: Verify the Seafile data directory is a mountpoint
+  ansible.builtin.command: mountpoint -q {{ seafile_data_dir }}
+  changed_when: false
+  check_mode: false
+
+# Database files and TLS state stay in named volumes on the Optane rootfs: constant
+# small writes stay off the HDDs, and their containers manage their own ownership.
+- name: Create Seafile volumes
+  community.docker.docker_volume:
+    name: "{{ item }}"
+  loop:
+    - seafile_db
+    - seafile_caddy_data
+
+- name: Create Seafile database container
+  community.docker.docker_container:
+    name: seafile-mysql
+    image: "{{ seafile_db_image }}"
+    restart_policy: unless-stopped
+    state: started
+    networks:
+      - name: seafile-net
+    volumes:
+      - seafile_db:/var/lib/mysql
+    env:
+      MYSQL_ROOT_PASSWORD: "{{ seafile_db_root_password }}"
+      MYSQL_LOG_CONSOLE: "true"
+      MARIADB_AUTO_UPGRADE: "1"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "--connect", "--mariadbupgrade", "--innodb_initialized"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  no_log: true
+
+# Upstream sets requirepass from an empty REDIS_PASSWORD by default and relies on
+# the private Docker network; nothing publishes this port. Persistence is off
+# upstream too (cache only).
+- name: Create Seafile cache container
+  community.docker.docker_container:
+    name: seafile-redis
+    image: "{{ seafile_redis_image }}"
+    restart_policy: unless-stopped
+    state: started
+    networks:
+      - name: seafile-net
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+# Compose's `depends_on: service_healthy`, which docker_container has no equivalent of.
+- name: Wait for the Seafile database to be healthy
+  community.docker.docker_container_info:
+    name: seafile-mysql
+  register: seafile_db_info
+  until: seafile_db_info.container.State.Health.Status | default('') == 'healthy'
+  retries: 30
+  delay: 10
+  changed_when: false
+
+# SEADOC, the notification server, Seafile AI and the metadata server are optional
+# upstream extensions with their own containers; none are deployed, so they are
+# switched off explicitly (upstream enables SeaDoc by default).
+# INIT_* values only matter on the very first start, while the data dir is empty.
+# After that, change the admin password in the web UI; changing it here does nothing.
+- name: Create Seafile server container
+  community.docker.docker_container:
+    name: seafile
+    image: "seafileltd/seafile-mc:{{ seafile_version }}"
+    restart_policy: unless-stopped
+    state: started
+    networks:
+      - name: seafile-net
+    volumes:
+      - "{{ seafile_data_dir }}:/shared" # library blocks, config, avatars on ZFS (mp0)
+    env:
+      SEAFILE_MYSQL_DB_HOST: seafile-mysql
+      SEAFILE_MYSQL_DB_PORT: "3306"
+      SEAFILE_MYSQL_DB_USER: "{{ seafile_db_username }}"
+      SEAFILE_MYSQL_DB_PASSWORD: "{{ seafile_db_password }}"
+      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: "{{ seafile_db_root_password }}"
+      SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet_db
+      SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile_db
+      SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: seahub_db
+      TIME_ZONE: "{{ seafile_time_zone }}"
+      INIT_SEAFILE_ADMIN_EMAIL: "{{ seafile_admin_email }}"
+      INIT_SEAFILE_ADMIN_PASSWORD: "{{ seafile_admin_password }}"
+      SEAFILE_SERVER_HOSTNAME: "{{ seafile_hostname }}"
+      SEAFILE_SERVER_PROTOCOL: https
+      SITE_ROOT: /
+      NON_ROOT: "false"
+      JWT_PRIVATE_KEY: "{{ seafile_jwt_private_key }}"
+      # Logs go to the (size-rotated) docker log rather than waking the HDDs via /shared/logs.
+      SEAFILE_LOG_TO_STDOUT: "true"
+      ENABLE_GO_FILESERVER: "true"
+      ENABLE_SEADOC: "false"
+      ENABLE_NOTIFICATION_SERVER: "false"
+      ENABLE_SEAFILE_AI: "false"
+      ENABLE_FACE_RECOGNITION: "false"
+      CACHE_PROVIDER: redis
+      REDIS_HOST: seafile-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+  no_log: true
+
+- name: Render the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /opt/seafile/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+  register: seafile_caddyfile
+
+# Deviation from upstream's caddy.yml: a stock caddy with a static Caddyfile instead of
+# caddy-docker-proxy, so the one container exposed to the internet does not get
+# the Docker socket (root on the guest). Ports are published on the guest's own
+# addresses (NAT66 via the bridge, see host_vars/seafile.yml); the guest's dmz GUA is
+# what ddns publishes. No UDP/443: the IPv4 proxy is TCP-only.
+- name: Create Seafile TLS front container
+  community.docker.docker_container:
+    name: seafile-caddy
+    image: "{{ seafile_caddy_image }}"
+    restart_policy: unless-stopped
+    state: started
+    restart: "{{ seafile_caddyfile is changed }}"
+    networks:
+      - name: seafile-net
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/seafile/Caddyfile:/etc/caddy/Caddyfile:ro
+      - seafile_caddy_data:/data

@@ -22,12 +22,14 @@ immich ansible_host=fd5a:715f:1edc:a703::26
 matrix ansible_host=fd5a:715f:1edc:a706::27
 hermes ansible_host=fd5a:715f:1edc:a703::28
 hermes-gateway ansible_host=fd5a:715f:1edc:a706::29
+seafile ansible_host=fd5a:715f:1edc:a706::2a
 
 # Debian tenants running Docker (roles/common/docker_host); per-host network params in host_vars.
 [lxc_docker]
 frigate
 nextcloud
 immich
+seafile
 
 # NixOS tenants: no apt, no dist-upgrade; see group_vars/lxc_nixos.yml.
 [lxc_nixos]

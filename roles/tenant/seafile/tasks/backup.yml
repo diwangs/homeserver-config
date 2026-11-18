@@ -1,0 +1,79 @@
+---
+# Nightly logical dump of the three Seafile databases onto the backup mount (ZFS,
+# mp1). The dump runs inside the db container with the root password it already has
+# in its environment, so no credential is written to the host. Seafile's own docs
+# say to dump the database *before* copying data, so a restore never has a DB that
+# references blocks the data copy lacks; the library blocks themselves are
+# immutable, so the live data dir is safe to copy afterwards. See README.
+- name: Install the Seafile database dump script
+  ansible.builtin.copy:
+    dest: /usr/local/sbin/seafile-db-dump
+    owner: root
+    group: root
+    mode: "0750"
+    content: |
+      #!/bin/sh
+      # Managed by Ansible (roles/tenant/seafile).
+      set -eu
+      dest={{ seafile_backup_dir }}
+      # Never fill the rootfs if the mount is missing (mp1 only appears after a restart).
+      mountpoint -q "$dest" || { echo "$dest is not mounted" >&2; exit 1; }
+      # Dump to a raw temp file first: in a `dump | gzip` pipeline sh has no pipefail, so a
+      # failed docker/mariadb-dump would still leave a valid (empty) gzip behind.
+      raw=$(mktemp "$dest/.dump.XXXXXX")
+      gz="$raw.gz"
+      trap 'rm -f "$raw" "$gz"' EXIT
+      docker exec seafile-mysql sh -c \
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb-dump -uroot --single-transaction --databases ccnet_db seafile_db seahub_db' \
+        > "$raw"
+      # mariadb-dump ends a complete dump with this marker; a truncated one lacks it.
+      tail -n 1 "$raw" | grep -q '^-- Dump completed' || { echo "incomplete dump" >&2; exit 1; }
+      gzip -c "$raw" > "$gz"
+      gzip -t "$gz"
+      chmod 0640 "$gz"
+      mv "$gz" "$dest/seafile-db-$(date +%Y%m%d-%H%M%S).sql.gz"
+      # Keep 14 dumps. Only reached after a verified new dump, so failures keep old ones.
+      ls -1t "$dest"/seafile-db-*.sql.gz | tail -n +15 | xargs -r rm --
+
+- name: Install the Seafile database dump service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/seafile-db-dump.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Dump the Seafile databases
+      Requires=docker.service
+      After=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/seafile-db-dump
+  register: seafile_dump_service
+
+- name: Install the Seafile database dump timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/seafile-db-dump.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Nightly Seafile database dump
+
+      [Timer]
+      OnCalendar=*-*-* 02:30:00
+      RandomizedDelaySec=15min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  register: seafile_dump_timer
+
+- name: Enable the Seafile database dump timer
+  ansible.builtin.systemd_service:
+    name: seafile-db-dump.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ seafile_dump_service is changed or seafile_dump_timer is changed }}"

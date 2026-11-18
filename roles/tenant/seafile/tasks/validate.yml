@@ -1,0 +1,30 @@
+---
+# Fail fast, before anything is changed in the guest: a missing vault entry would
+# otherwise start MariaDB with an empty root password, or Seafile with a guessable
+# admin password / JWT key, and those are only read on first initialisation.
+- name: Require the Seafile vault entries
+  ansible.builtin.assert:
+    that:
+      - seafile_db_password | length >= 16
+      - seafile_db_password is match('^[A-Za-z0-9]+$')
+      - seafile_db_root_password | length >= 16
+      - seafile_db_root_password is match('^[A-Za-z0-9]+$')
+      - seafile_db_root_password != seafile_db_password
+      - seafile_jwt_private_key | length >= 32
+      - seafile_admin_email is match('^[^@\s]+@[^@\s]+\.[^@\s]+$')
+      - seafile_admin_password | length >= 12
+    fail_msg: >-
+      Missing or invalid Seafile secrets. Add to group_vars/all/vault.yml
+      (ansible-vault edit): vault_seafile_db_password and
+      vault_seafile_db_root_password (distinct, alphanumeric only, 16+ characters),
+      vault_seafile_jwt_private_key (random, 32+ characters),
+      vault_seafile_admin_email (a valid address) and vault_seafile_admin_password
+      (12+ characters). See roles/tenant/seafile/README.md.
+    quiet: true
+  no_log: true
+
+- name: Require the public hostname
+  ansible.builtin.assert:
+    that: seafile_hostname | length > 0
+    fail_msg: seafile_hostname (group_vars/all/vars.yml) resolved to an empty string; check vault_public_domain.
+    quiet: true

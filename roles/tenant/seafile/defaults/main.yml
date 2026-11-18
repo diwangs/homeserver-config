@@ -1,0 +1,17 @@
+---
+# Pinned release: never use `13.0-latest` (a floating tag that moves under the
+# stack on any re-pull). Upgrade procedure: read the release notes and the upgrade
+# page for the target version at https://manual.seafile.com/ (major/minor bumps need
+# manual steps), compare the upstream seafile-server.yml / .env at that version
+# with tasks/seafile.yml, back up first (see README), bump this, and rerun
+# playbooks/configure.yml.
+seafile_version: 13.0.29
+# Images from the same upstream docker/ce/.env as seafile_version; MariaDB 10.11 is
+# the version Seafile 13.0 documents. Redis is unpinned upstream; pinned to a major
+# here so a re-pull cannot change it.
+seafile_db_image: mariadb:10.11
+seafile_redis_image: redis:7
+seafile_caddy_image: caddy:2
+
+seafile_db_username: seafile
+seafile_time_zone: America/New_York
