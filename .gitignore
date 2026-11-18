@@ -22,3 +22,6 @@ extern/ipv4-proxy/fly.toml
 # Rendered by Ansible from the vault into the flake build/deploy copies; never
 # belongs in the source tree
 roles/tenant/*/files/nixos/site.nix
+
+# Python bytecode from the offline role tests
+__pycache__/

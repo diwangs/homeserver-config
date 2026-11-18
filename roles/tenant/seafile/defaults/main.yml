@@ -3,8 +3,11 @@
 # stack on any re-pull). Upgrade procedure: read the release notes and the upgrade
 # page for the target version at https://manual.seafile.com/ (major/minor bumps need
 # manual steps), compare the upstream seafile-server.yml / .env at that version
-# with tasks/seafile.yml, back up first (see README), bump this, and rerun
-# playbooks/configure.yml.
+# with files/nixos/configuration.nix, back up first (see README), bump this, and
+# rerun playbooks/configure.yml.
+#
+# The image pins below are rendered into the guest's site.nix (templates/site.nix.j2)
+# and consumed by virtualisation.oci-containers in files/nixos/configuration.nix.
 seafile_version: 13.0.29
 # Images from the same upstream docker/ce/.env as seafile_version; MariaDB 10.11 is
 # the version Seafile 13.0 documents. Redis is unpinned upstream; pinned to a major
@@ -15,3 +18,9 @@ seafile_caddy_image: caddy:2
 
 seafile_db_username: seafile
 seafile_time_zone: America/New_York
+
+# false keeps the application containers (seafile, seafile-caddy) stopped and not
+# enabled, while MariaDB and Redis run. Only for the Debian -> NixOS migration, which
+# has to restore the SQL dump into the empty database before Seafile first starts:
+#   ansible-playbook playbooks/configure.yml --limit seafile -e seafile_start_app=false
+seafile_start_app: true

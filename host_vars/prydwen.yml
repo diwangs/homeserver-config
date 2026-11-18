@@ -642,12 +642,10 @@ prydwen_uci_sections:
       hostid: "29"
       duid: ["00020000ab116865726d6777006c%686d6777"]
       mac: ["BC:24:11:6C:29:01"]
-  # Public Seafile tenant (CT109, dmz). hwaddr is pinned in host_vars/seafile.yml.
-  # TODO(operator): a Debian guest's DUID is random, so it cannot be written before the
-  # first boot. After init_proxmox.yml, read it from `ubus call dhcp ipv6leases` (or
-  # the odhcpd lease for hostname `seafile`), add
-  #   duid: ["<duid>%<iaid>"]
-  # here and rerun `playbooks/configure.yml --limit prydwen` (README, "First run").
+  # Public Seafile tenant (CT109, dmz). Assigned, not discovered, like matrix: the
+  # guest is NixOS and pins this exact DUID/IAID in its image
+  # (roles/tenant/seafile/files/nixos/configuration.nix), so this lease can be written
+  # before the container has ever booted. hwaddr is pinned in host_vars/seafile.yml.
   - config: dhcp
     type: host
     name: host_seafile
@@ -655,6 +653,7 @@ prydwen_uci_sections:
     value:
       leasetime: 10m
       hostid: "2a"
+      duid: ["00020000ab1173656166696c006d%73656166"]
       mac: ["BC:24:11:5A:F1:09"]
   - config: dhcp
     type: host

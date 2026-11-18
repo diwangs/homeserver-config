@@ -13,13 +13,17 @@
       - seafile_jwt_private_key | length >= 32
       - seafile_admin_email is match('^[^@\s]+@[^@\s]+\.[^@\s]+$')
       - seafile_admin_password | length >= 12
+      # They are written as `KEY=value` lines for `docker run --env-file`: a line break
+      # would end the value early and turn the rest into another variable.
+      - seafile_jwt_private_key is not search('[\r\n]')
+      - seafile_admin_password is not search('[\r\n]')
     fail_msg: >-
       Missing or invalid Seafile secrets. Add to group_vars/all/vault.yml
       (ansible-vault edit): vault_seafile_db_password and
       vault_seafile_db_root_password (distinct, alphanumeric only, 16+ characters),
-      vault_seafile_jwt_private_key (random, 32+ characters),
+      vault_seafile_jwt_private_key (random, 32+ characters, one line),
       vault_seafile_admin_email (a valid address) and vault_seafile_admin_password
-      (12+ characters). See roles/tenant/seafile/README.md.
+      (12+ characters, one line). See roles/tenant/seafile/README.md.
     quiet: true
   no_log: true
 

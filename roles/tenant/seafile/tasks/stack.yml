@@ -1,0 +1,51 @@
+---
+# The container units skip themselves while their env file is missing, and a unit that
+# is already running keeps the environment it was created with, so after the rebuild
+# make sure each unit is up — and recreated when its credentials just changed
+# (as the old docker_container tasks did). Only units whose credentials changed on an
+# existing guest are restarted: on the first run the stack is brand new, and bouncing
+# Seafile in the middle of its first initialisation could leave /shared half-written.
+# Restarting MariaDB also restarts seafile and seafile-caddy (they Require it).
+
+# mp0 only exists if the LXC was created with it; without the mount, Docker would
+# silently create the bind source on the rootfs and the library would land there. The
+# unit has the same guard (ExecStartPre); this one fails the play with a clear task.
+- name: Verify the Seafile data directory is a mountpoint
+  ansible.builtin.command: mountpoint -q {{ seafile_data_dir }}
+  changed_when: false
+  check_mode: false
+
+- name: Verify the Seafile backup directory is a mountpoint
+  ansible.builtin.command: mountpoint -q {{ seafile_backup_dir }}
+  changed_when: false
+  check_mode: false
+
+- name: Start the Seafile database and cache
+  ansible.builtin.systemd_service:
+    name: "{{ item.unit }}"
+    state: "{{ 'restarted' if item.restart else 'started' }}"
+  loop:
+    - unit: docker-seafile-mysql.service
+      restart: "{{ seafile_mysql_env is changed and seafile_mysql_env_before.stat.exists }}"
+    - unit: docker-seafile-redis.service
+      restart: false
+  loop_control:
+    label: "{{ item.unit }}"
+
+# `start` returns once the unit's pre-start checks pass, i.e. once MariaDB is healthy.
+# With seafile_start_app=false (migration) the application stays down until the dump
+# has been restored; see README.
+- name: Start the Seafile application
+  ansible.builtin.systemd_service:
+    name: "{{ item.unit }}"
+    state: "{{ 'restarted' if item.restart else 'started' }}"
+  loop:
+    - unit: docker-seafile.service
+      restart: >-
+        {{ (seafile_server_env is changed and seafile_server_env_before.stat.exists)
+        or (seafile_mysql_env is changed and seafile_mysql_env_before.stat.exists) }}
+    - unit: docker-seafile-caddy.service
+      restart: false
+  loop_control:
+    label: "{{ item.unit }}"
+  when: seafile_start_app | bool

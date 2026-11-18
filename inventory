@@ -29,10 +29,10 @@ seafile ansible_host=fd5a:715f:1edc:a706::2a
 frigate
 nextcloud
 immich
-seafile
 
 # NixOS tenants: no apt, no dist-upgrade; see group_vars/lxc_nixos.yml.
 [lxc_nixos]
 matrix
 hermes
 hermes-gateway
+seafile

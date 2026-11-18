@@ -3,12 +3,16 @@
 # them has a default: tasks/validate.yml fails the play before touching the guest
 # when one is missing or too weak. The `default('')` only lets that assert report
 # every missing name at once instead of erroring on the first undefined variable.
+# They are rendered only into root-only runtime env files (tasks/secrets.yml), never
+# into the flake tree, the image or the Nix store.
 seafile_db_password: "{{ vault_seafile_db_password | default('') }}"
 seafile_db_root_password: "{{ vault_seafile_db_root_password | default('') }}"
 seafile_jwt_private_key: "{{ vault_seafile_jwt_private_key | default('') }}"
 seafile_admin_email: "{{ vault_seafile_admin_email | default('') }}"
 seafile_admin_password: "{{ vault_seafile_admin_password | default('') }}"
 
-# Keep in step with the mp0/mp1 lines in host_vars/seafile.yml.
+# Keep in step with the mp0/mp1 lines in host_vars/seafile.yml and with dataDir,
+# backupDir and secretsDir in files/nixos/configuration.nix (tests/ checks all three).
 seafile_data_dir: /mnt/seafile
 seafile_backup_dir: /mnt/seafile-backup
+seafile_secrets_dir: /var/lib/seafile/secrets
