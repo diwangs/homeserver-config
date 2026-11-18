@@ -184,8 +184,16 @@ internet.
 - An issue is queued once. The poller records it in
   `/var/lib/hermes/linear-poller-state.json`, and the card's idempotency key is
   derived from the issue id, so moving an issue back to Todo or delegating it
-  again does not create a second card. Use
-  `hermes kanban unblock` or `reopen-review` on the existing card instead.
+  again does not create a second card.
+- **Follow-ups:** comment on the issue. On each pass the poller passes new
+  comments from people (not the app's own, not integrations') to the issue's
+  latest card. A blocked card gets them as a card comment and is unblocked; a
+  finished card gets a follow-up card, linked to it as its parent, in the same
+  clone, which pushes to the same PR (or opens a new one from a new branch if
+  that PR was merged or closed); a card still in progress gets them as a card
+  comment. This only works while the issue is open and still delegated: to
+  follow up on a completed issue, move it back to an open state first.
+  Comments are untrusted input to the worker, the same as the description.
 
 ### Accounts and secrets
 
@@ -254,7 +262,8 @@ hermes kanban tail <card id>              # follow one worker
 hermes kanban diagnostics                 # stranded or stuck cards
 ~~~
 
-`journalctl -u hermes-linear-poller` shows each pass: the cards it created and
-the issues it skipped and why. Clones of cards finished more than seven days ago
-are removed by the poller. At most two cards run at once (`kanban.max_in_progress`),
+`journalctl -u hermes-linear-poller` shows each pass: the cards it created, the
+comments it passed on, and the issues it skipped and why. Clones of cards
+finished more than seven days ago are removed by the poller, unless a follow-up
+card still uses them. At most two cards run at once (`kanban.max_in_progress`),
 and the 8 GiB memory limit is the reason.
