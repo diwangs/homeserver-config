@@ -17,10 +17,16 @@ hass_net:
   # Backend VLAN, because we need to connect to IoT and stuffs
   net0: virtio,bridge=vmbr1,tag=3,firewall=1
 hass_scsihw: virtio-scsi-single
-hass_usb:
-  usb0: "host={{ skyconnect_busid }}" # skyconnect_busid: host_vars/sentinel-lp.yml
+# Creation-time only (create.yml); never reconciled. The SkyConnect moved to the iot CT
+# (CT112, host_vars/iot.yml, iot_radio_by_id) with the Zigbee/Thread stack; detach it from a live VM with
+# `qm set 200 --delete usb0` (roles/tenant/iot/README.md, "Migration").
+hass_usb: {}
 
 # Mutable resources. Read at creation and reconciled onto the live VM by
 # tasks/reconcile.yml (proxmox_kvm update: true). No swap: this is a VM.
 hass_cores: 2
+# QEMU guest agent (HAOS ships qemu-ga): lets the Proxmox host run commands in the guest
+# with `qm guest exec 200` and shut it down cleanly. A change takes effect on the next full
+# VM stop/start, not on a reboot from inside the guest.
+hass_agent: "enabled=1"
 hass_memory: 6144

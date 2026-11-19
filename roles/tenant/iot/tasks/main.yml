@@ -1,0 +1,32 @@
+---
+# Reconcile the running iot guest (CT112: Zigbee radio stack, Thread border router,
+# Mosquitto, Zigbee2MQTT). Runs in-guest via `pct exec` through the Proxmox host
+# (group_vars/tenant_lxc.yml), from playbooks/configure.yml.
+#
+# Same shape as roles/tenant/dav: one flake tree and one `nixos-rebuild`; the same tree
+# built the image (tasks/build_template.yml). The radio is a Proxmox device passthrough
+# (dev0 in host_vars/iot.yml), not something this role touches.
+#
+# The Zigbee state is NOT created here: playbooks/migrate_iot.yml copies it from HAOS and
+# writes the marker that lets the radio stack and Zigbee2MQTT start. Until then this
+# role only brings up Mosquitto.
+- name: Validate IoT inputs
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Prepare the Proxmox host for the border router
+  ansible.builtin.import_tasks: host.yml
+
+# Before the rebuild: Mosquitto skips itself (ConditionPathExists) until its password
+# files exist.
+- name: Install the broker credentials
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Deploy the IoT NixOS configuration
+  ansible.builtin.import_tasks: nixos.yml
+
+# After the rebuild: the zigbee2mqtt user and its data directory come from it.
+- name: Install the Zigbee2MQTT secrets
+  ansible.builtin.import_tasks: z2m_secrets.yml
+
+- name: Start the IoT services
+  ansible.builtin.import_tasks: stack.yml

@@ -42,6 +42,7 @@ playbooks/
   init_openwrt.yml       first-run provisioning of the prydwen router
   upgrade_lxc_dist.yml   in-place Debian major upgrade of one tenant
   migrate_hermes.yml     one-off: split the Matrix gateway out of hermes into CT108
+  migrate_iot.yml        one-off: move the Zigbee/Thread state from the HAOS add-ons into CT112
 roles/
   host/                 physical host, router, and guest provisioning
     proxmox_lxc, proxmox_templates, zfs, hd_idle, clat, prydwen,
@@ -50,7 +51,8 @@ roles/
     docker_host, portainer, cifs_mount, journald, disable_ssh
   tenant/               one role per tenant service
     hass, nas, omada, frigate, seedbox, immich, matrix, hermes, hermes_gateway,
-    seafile, dav (Radicale), bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md)
+    seafile, dav (Radicale), bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md),
+    iot (Zigbee multiprotocol radio, Thread border router, Mosquitto, Zigbee2MQTT)
   maintenance/
     debian_dist_upgrade used by playbooks/upgrade_lxc_dist.yml
 docs/network.md          network design notes
@@ -61,7 +63,9 @@ The `host` inventory group contains `sentinel-lp` and `prydwen`; platform-specif
 plays target each host directly. Guests belong to `tenant_lxc`, with their
 connection settings in `group_vars/tenant_lxc.yml`.
 Home Assistant is a KVM tenant: `roles/tenant/hass` runs on `sentinel-lp` to
-create its VM and reconcile resources, with no in-guest Ansible tasks.
+create its VM and reconcile resources, with no in-guest Ansible tasks. Its Zigbee, Thread
+and MQTT add-ons moved to the `iot` CT (`roles/tenant/iot/README.md`); HA reaches them
+over the backend.
 
 Day to day: `ansible-playbook playbooks/configure.yml` (optionally `--limit <host>`).
 Cold start: `playbooks/init_proxmox.yml` → set the DHCPv6 leases →

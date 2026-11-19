@@ -738,6 +738,18 @@ prydwen_uci_sections:
       hostid: "2c"
       duid: ["00020000ab11726164696361006f%72616469"]
       mac: ["BC:24:11:DA:0D:2C"]
+  # Zigbee/Thread/MQTT (CT112, backend). Assigned, not discovered, like dav: the NixOS
+  # guest pins this exact DUID/IAID in its image (roles/tenant/iot/files/nixos/
+  # configuration.nix), and hwaddr is pinned in host_vars/iot.yml.
+  - config: dhcp
+    type: host
+    name: host_iot
+    find: { name: iot }
+    value:
+      leasetime: 10m
+      hostid: "2d"
+      duid: ["00020000ab11696f746c78630070%696f746c"]
+      mac: ["BC:24:11:69:6F:2D"]
   - config: dhcp
     type: host
     name: host_vertibird_ap_v6

@@ -18,6 +18,7 @@
     net: "{{ hass_net }}"
     scsihw: "{{ hass_scsihw }}"
     usb: "{{ hass_usb }}"
+    agent: "{{ hass_agent }}"
     onboot: true
 
 - name: Check if disk 1 exists

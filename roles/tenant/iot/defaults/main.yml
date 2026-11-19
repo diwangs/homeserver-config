@@ -1,0 +1,25 @@
+---
+# The Silicon Labs Multiprotocol add-on image the radio stack runs from (deprecated
+# upstream; the image is still published, its source is gone from home-assistant/addons).
+# Pinned by digest, never a floating tag: its cpcd/zigbeed/otbr-agent must match the RCP
+# firmware already on the radio, and the version must equal the add-on version HAOS ran
+# (playbooks/migrate_iot.yml checks it against the backup). Rendered into site.nix.
+iot_multipan_version: "2.4.6"
+iot_multipan_digest: sha256:d80bd3407f6d5085605af5b33a5ba0e3c700e122918e96ca0f4474eeac3f80b3
+
+# The add-on's serial defaults (options `baudrate`, `flow_control`), which the RCP
+# firmware it flashed expects. The migration compares them with the add-on's options in
+# the backup.
+iot_radio_baudrate: 460800
+iot_radio_flow_control: true
+
+# Fallback if Docker cannot apply --device rules inside the unprivileged CT (cgroup-v2
+# device programs): run the multipan container --privileged instead of granting the
+# radio, /dev/net/tun and three capabilities. Still confined by the unprivileged CT.
+iot_multipan_privileged: false
+
+# Extra Zigbee2MQTT settings carried over from the HAOS configuration.yaml (availability,
+# ota, device_options, advanced.log_level, ...), merged under the settings in
+# files/nixos/configuration.nix (which win). No secrets: this ends up in /nix/store.
+# The migration prints the old file's other settings for review.
+iot_z2m_extra_settings: {}

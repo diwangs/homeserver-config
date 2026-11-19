@@ -40,8 +40,8 @@ container) is **owned by this repo**: `templates/config.yaml.j2`, rendered by
 the template instead. A changed config restarts Frigate (handler); the previous file is kept
 beside it as a timestamped backup (`backup: true`). Credentials come from the vault:
 `vault_frigate_cam_indoor_stream` / `vault_frigate_cam_outdoor_stream` (full RTSP URLs,
-camera logins included), `vault_frigate_mqtt_host`, `vault_frigate_mqtt_user` and
-`vault_frigate_mqtt_password`.
+camera logins included). MQTT goes to Mosquitto in the iot CT (`roles/tenant/iot`) as user
+`frigate`, with `vault_iot_mqtt_password_frigate` (see `vars/main.yml`).
 
 ## Subnets
 - VLAN 3 -> backend (mgmt + web UIs); LXC at `fd5a:715f:1edc:a703::22`

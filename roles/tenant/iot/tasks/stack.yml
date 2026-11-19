@@ -1,0 +1,33 @@
+---
+# Mosquitto skips itself until its password files exist, and only reads them at start,
+# so make sure it is up after the rebuild and restart it when they just changed.
+- name: Start the MQTT broker
+  ansible.builtin.systemd_service:
+    name: mosquitto.service
+    state: "{{ 'restarted' if iot_mqtt_secrets is changed else 'started' }}"
+
+# The radio stack and Zigbee2MQTT may only start once playbooks/migrate_iot.yml has put
+# the HAOS state in place (their units carry the same condition).
+- name: Check whether the Zigbee state has been migrated
+  ansible.builtin.stat:
+    path: "{{ iot_migrated_marker }}"
+  register: iot_migrated
+
+- name: Report that the Zigbee services are waiting for the migration
+  ansible.builtin.debug:
+    msg: >-
+      {{ iot_migrated_marker }} is missing: the radio stack and Zigbee2MQTT stay stopped until
+      playbooks/migrate_iot.yml has copied the HAOS state (roles/tenant/iot/README.md).
+  when: not iot_migrated.stat.exists
+
+- name: Start the radio stack
+  ansible.builtin.systemd_service:
+    name: docker-multipan.service
+    state: started
+  when: iot_migrated.stat.exists
+
+- name: Start Zigbee2MQTT
+  ansible.builtin.systemd_service:
+    name: zigbee2mqtt.service
+    state: "{{ 'restarted' if iot_z2m_secrets is changed else 'started' }}"
+  when: iot_migrated.stat.exists

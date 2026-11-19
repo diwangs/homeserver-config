@@ -6,6 +6,8 @@ frigate_smb_password: "{{ vault_frigate_smb_password }}"
 # camera logins). Real values live in the encrypted group_vars/all/vault.yml.
 frigate_cam_indoor_stream: "{{ vault_frigate_cam_indoor_stream }}"
 frigate_cam_outdoor_stream: "{{ vault_frigate_cam_outdoor_stream }}"
-frigate_mqtt_host: "{{ vault_frigate_mqtt_host }}"
-frigate_mqtt_user: "{{ vault_frigate_mqtt_user }}"
-frigate_mqtt_password: "{{ vault_frigate_mqtt_password }}"
+# The broker is Mosquitto in the iot CT (roles/tenant/iot); the frigate login and its
+# password are defined there.
+frigate_mqtt_host: "{{ hostvars['iot'].ansible_host }}"
+frigate_mqtt_user: frigate
+frigate_mqtt_password: "{{ vault_iot_mqtt_password_frigate }}"

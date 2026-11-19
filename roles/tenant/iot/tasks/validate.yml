@@ -1,0 +1,64 @@
+---
+# Fail fast, before anything is changed. The Zigbee parameters are the ones that matter
+# most: if they differ from what zigbeed holds, Zigbee2MQTT forms a new network.
+- name: Require the Zigbee network key
+  ansible.builtin.assert:
+    that:
+      - iot_zigbee_network_key is sequence and iot_zigbee_network_key is not string
+      - iot_zigbee_network_key | length == 16
+      - iot_zigbee_network_key | map('int') | select('ge', 0) | select('le', 255) | list | length == 16
+    fail_msg: >-
+      vault_iot_zigbee_network_key must be the 16-number `advanced.network_key` list from the
+      HAOS Zigbee2MQTT configuration.yaml. See roles/tenant/iot/README.md.
+    quiet: true
+  no_log: true
+
+- name: Require the Zigbee network identity
+  ansible.builtin.assert:
+    that:
+      - iot_zigbee_pan_id_int | int > 0
+      - iot_zigbee_pan_id_int | int < 65535
+      - iot_zigbee_ext_pan_id is sequence and iot_zigbee_ext_pan_id is not string
+      - iot_zigbee_ext_pan_id | length == 8
+      - iot_zigbee_ext_pan_id | map('int') | select('ge', 0) | select('le', 255) | list | length == 8
+      - iot_zigbee_channel | int >= 11
+      - iot_zigbee_channel | int <= 26
+    fail_msg: >-
+      vault_iot_zigbee_pan_id / _ext_pan_id / _channel must be copied from the HAOS
+      Zigbee2MQTT configuration.yaml (`advanced:`): pan_id a number or 0x hex string,
+      ext_pan_id a list of 8 numbers, channel 11-26.
+    quiet: true
+
+- name: Require the broker and frontend credentials
+  ansible.builtin.assert:
+    that:
+      - iot_mqtt_passwords.values() | select('match', '^[^\s:]{16,}$') | list | length == 3
+      - iot_z2m_frontend_token is match('^[A-Za-z0-9._~-]{16,}$')
+    fail_msg: >-
+      vault_iot_mqtt_password_{z2m,hass,frigate} (>= 16 chars, no whitespace or colons) and
+      vault_iot_z2m_frontend_token (>= 16 URL-safe chars) are required, e.g. from
+      `openssl rand -hex 24`.
+    quiet: true
+  no_log: true
+
+- name: Require a stable radio path and a pinned image
+  ansible.builtin.assert:
+    that:
+      - iot_radio_device is match('^/dev/serial/by-id/\S+$')
+      - "'CHANGEME' not in iot_radio_device"
+      - iot_multipan_digest is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      iot_radio_by_id (host_vars/iot.yml) must be the radio's /dev/serial/by-id path
+      (the Digirig has the same CP210x chip, so ttyUSBn is not stable). HAOS sees the same
+      path: it is the Multiprotocol add-on's `device` option. iot_multipan_digest must be a
+      sha256 digest.
+    quiet: true
+
+# site.nix embeds them as a Nix "..." string, where ${ would start an interpolation.
+- name: Require Nix-safe extra Zigbee2MQTT settings
+  ansible.builtin.assert:
+    that:
+      - iot_z2m_extra_settings is mapping
+      - "'${' not in (iot_z2m_extra_settings | to_json)"
+    fail_msg: iot_z2m_extra_settings must be a mapping and must not contain '${'.
+    quiet: true

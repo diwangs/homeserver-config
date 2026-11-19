@@ -1,0 +1,56 @@
+---
+# Set to true in the cutover (roles/tenant/iot/README.md, "Migration") once the radio has
+# been detached from the Home Assistant VM. Proxmox refuses to start a CT whose devN path
+# does not exist, and the radio's by-id path only exists on the host while no VM holds the
+# USB device, so dev0 must not be in the config before then.
+iot_radio_attached: true
+
+# The SkyConnect's stable path on sentinel-lp once no VM holds it (the Digirig's CP210x
+# shares its chip, so ttyUSBn order is not stable). Passed into the CT at the same path
+# (dev0 below). The path is built from the USB descriptors, so HAOS shows the same one:
+# it is the Multiprotocol add-on's `device` option (or `ls -l /dev/serial/by-id/` on the
+# host, once detached). Read by other hosts' tasks as hostvars['iot'].iot_radio_by_id.
+iot_radio_by_id: /dev/serial/by-id/usb-Nabu_Casa_SkyConnect_v1.0_a25a4566be9aed11b6728208a8669f5d-if00-port0
+
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 112
+  hostname: iot
+  # Not a pveam Debian image: a NixOS tarball built from roles/tenant/iot/files/nixos by
+  # roles/tenant/iot/tasks/build_template.yml, which runs right before the create task.
+  template: nixos
+  template_role: iot
+  # ostype=nixos stops Proxmox applying its Debian-style guest fixups.
+  ostype: nixos
+  nixos_path_shim: true
+  # Nix store + the multipan image (~0.5 GB). Zigbee/Thread/MQTT state is small.
+  # Grow later with `pct resize 112 rootfs +NG`.
+  disk: local-lvm:8
+  cores: 2
+  # Zigbee2MQTT ~200 MB, the radio stack ~100 MB; the headroom is for nixos-rebuild.
+  memory: 1024
+  swap: 512
+  netif:
+    # backend (VLAN 3), next to Home Assistant and Frigate: the MQTT clients, and the
+    # Thread border router's backbone (HA's Matter server must see its route adverts).
+    # ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix (which pins the DHCPv6 DUID/IAID the router's
+    # reservation matches). hwaddr is pinned so the lease survives a rebuild.
+    net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip6=manual,hwaddr=BC:24:11:69:6F:2D"
+  unprivileged: true
+  features:
+    - nesting=1 # Required to run docker, and by the Nix daemon's build sandbox
+  # dev1: TUN for otbr-agent's wpan0 (present at first boot).
+  # dev0: the SkyConnect, only once iot_radio_attached (see above). Applied by the
+  # reconcile in playbooks/configure.yml; takes effect on the next CT restart, which
+  # playbooks/migrate_iot.yml does.
+  config_lines: >-
+    {{ [{'key': 'dev1', 'value': '/dev/net/tun', 'at_create': true}]
+       + ([{'key': 'dev0', 'value': iot_radio_by_id}] if iot_radio_attached else []) }}
+  # No networkd_interfaces: eth3 addressing ships inside the NixOS image.
+
+# Non-default Z2M settings carried over from the HAOS add-on config (merged into
+# services.zigbee2mqtt.settings).
+iot_z2m_extra_settings:
+  advanced:
+    cache_state_send_on_startup: false

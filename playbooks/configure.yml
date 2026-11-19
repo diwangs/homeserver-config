@@ -81,6 +81,13 @@
   roles:
     - role: dav
 
+# Zigbee radio stack, Thread border router, Mosquitto and Zigbee2MQTT. The Zigbee services
+# stay stopped until playbooks/migrate_iot.yml has copied the HAOS state in.
+- name: Configure IoT tenant
+  hosts: iot
+  roles:
+    - role: iot
+
 # The public HTTP(S) edge for matrix, hermes, seafile and dav. After the origins, so a first
 # run finds them already serving plain HTTP on :80.
 - name: Configure BunkerWeb tenant

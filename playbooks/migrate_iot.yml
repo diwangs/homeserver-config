@@ -1,0 +1,474 @@
+---
+# One-time cutover of the Zigbee/Thread state from the HAOS add-ons into CT112 (iot).
+# roles/tenant/iot/README.md, "Migration", is the runbook; this playbook is its cutover step:
+#
+#   ansible-playbook playbooks/migrate_iot.yml
+#
+# Runs entirely on sentinel-lp. It reaches into HAOS (VM 200) through the QEMU guest agent
+# (hass_agent, roles/tenant/hass) and into CT112 with pct, so no HA backup or manual HAOS
+# step is involved:
+#   1. freeze HAOS: Zigbee2MQTT, Silicon Labs Multiprotocol and Mosquitto set to
+#      boot=manual and stopped, through the Supervisor API
+#   2. pull zigbeed's state, the Thread dataset and Z2M's data (not its logs) into a root-only
+#      directory, never printing them (they hold the network key)
+#   3. check, before anything moves, that the add-on version/radio settings match the pins
+#      and that the Zigbee parameters agree between the vault, the old Z2M configuration
+#      and Z2M's coordinator backup — otherwise Z2M would form a NEW network
+#   4. hot-unplug the radio from VM 200, restart CT112 (dev0), push the state in, write the
+#      marker, start the radio stack and Z2M
+# Refuses to run twice unless -e iot_force=true (which replaces the migrated state). Expects
+# `iot_radio_attached: true` already reconciled (dev0 in /etc/pve/lxc/112.conf).
+#
+# Rehearsal: -e iot_rehearse=true pulls and checks the state with the add-ons still running,
+# then stops. HAOS, the radio and CT112 are left untouched (CT112 need not exist yet).
+
+- name: Move the Zigbee and Thread state from HAOS into CT112
+  hosts: sentinel-lp
+  gather_facts: false
+  vars:
+    iot_force: false
+    iot_rehearse: false
+    iot_vmid: "{{ hostvars['iot'].proxmox_lxc.vmid }}"
+    iot_hass_vmid: 200 # hass_vmid, roles/tenant/hass/defaults/main.yml
+    iot_stage: /root/iot-migration
+    iot_helper: "{{ iot_stage }}/haos_exec.py"
+    iot_haos_data: /mnt/data/supervisor
+    # Order matters: Z2M first (it writes its last coordinator backup and state on stop),
+    # then the radio stack, then the broker.
+    iot_haos_apps: [45df7312_zigbee2mqtt, core_silabs_multiprotocol, core_mosquitto]
+    # Settings files/nixos/configuration.nix owns; everything else in the old config is
+    # printed for review (-> iot_z2m_extra_settings).
+    iot_z2m_managed_keys: [version, homeassistant, mqtt, serial, frontend, devices, groups, permit_join]
+    iot_z2m_managed_advanced: [network_key, pan_id, ext_pan_id, channel]
+    # Talks to the Supervisor from its CLI container (which holds the token). $1 method,
+    # $2 path, $3 optional JSON body.
+    iot_api_fn: >-
+      api() { docker exec hassio_cli sh -c 'curl -sf -X "$0" -H "Authorization: Bearer $SUPERVISOR_TOKEN"
+      -H "Content-Type: application/json" ${2:+--data "$2"} "http://supervisor$1"' "$@"; }
+  tasks:
+    # Brings the role's defaults/vars (vault indirection, pins, paths) into scope.
+    - name: Validate IoT inputs
+      ansible.builtin.import_role:
+        name: iot
+        tasks_from: validate.yml
+
+    # ── Preconditions (nothing changed yet) ─────────────────────────────────
+    - name: Read the iot CT config
+      ansible.builtin.command: pct config {{ iot_vmid }}
+      register: iot_pct
+      changed_when: false
+      when: not (iot_rehearse | bool)
+
+    - name: Require dev0 to be configured for CT112
+      ansible.builtin.assert:
+        that:
+          - hostvars['iot'].iot_radio_attached | bool
+          - >-
+            iot_pct.stdout is search('(?m)^dev0: ' ~ (iot_radio_device | regex_escape) ~ '(,|$)')
+        fail_msg: >-
+          Set iot_radio_attached: true (host_vars/iot.yml) and run
+          `ansible-playbook playbooks/configure.yml --limit sentinel-lp` first.
+        quiet: true
+      when: not (iot_rehearse | bool)
+
+    - name: Check for an earlier migration
+      ansible.builtin.command: pct exec {{ iot_vmid }} -- test -e {{ iot_migrated_marker }}
+      register: iot_marker
+      changed_when: false
+      failed_when: false
+      when: not (iot_rehearse | bool)
+
+    - name: Refuse to migrate twice
+      ansible.builtin.assert:
+        that: iot_marker.rc != 0 or (iot_force | bool)
+        fail_msg: >-
+          {{ iot_migrated_marker }} exists: CT112 already has the migrated state (and has been
+          running the network, so its frame counter is ahead of HAOS). Re-run with
+          -e iot_force=true only if you really mean to replace it.
+        quiet: true
+      when: not (iot_rehearse | bool)
+
+    - name: Require the HAOS guest agent
+      ansible.builtin.command: qm agent {{ iot_hass_vmid }} ping
+      changed_when: false
+
+    - name: Create the root-only staging directory
+      ansible.builtin.file:
+        path: "{{ iot_stage }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Install the guest-agent helper
+      ansible.builtin.copy:
+        src: ../roles/tenant/iot/files/haos_exec.py
+        dest: "{{ iot_helper }}"
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Move the state across
+      block:
+        # ── 1. Freeze HAOS ──────────────────────────────────────────────────
+        - name: Stop the add-ons in HAOS and keep them from starting on boot
+          ansible.builtin.command:
+            cmd: python3 {{ iot_helper }} {{ iot_hass_vmid }}
+            stdin: |
+              set -e
+              {{ iot_api_fn }}
+              for s in {{ iot_haos_apps | join(' ') }}; do
+                api POST /addons/$s/options '{"boot":"manual"}' >/dev/null
+                if [ "$(api GET /addons/$s/info | jq -r .data.state)" = started ]; then
+                  api POST /addons/$s/stop >/dev/null
+                fi
+              done
+              for s in {{ iot_haos_apps | join(' ') }}; do
+                api GET /addons/$s/info | jq -c '{slug: .data.slug, state: .data.state, boot: .data.boot}'
+              done
+          register: iot_freeze
+          changed_when: true
+          when: not (iot_rehearse | bool)
+
+        - name: Require the add-ons stopped and on manual boot
+          ansible.builtin.assert:
+            that:
+              - iot_freeze.stdout_lines | map('from_json') | selectattr('state', 'eq', 'stopped') | list | length == iot_haos_apps | length
+              - iot_freeze.stdout_lines | map('from_json') | selectattr('boot', 'eq', 'manual') | list | length == iot_haos_apps | length
+            fail_msg: "HAOS add-ons not frozen: {{ iot_freeze.stdout_lines }}"
+            quiet: true
+          when: not (iot_rehearse | bool)
+
+        # Only non-secret fields leave HAOS on this path.
+        - name: Read the add-on versions and radio settings
+          ansible.builtin.command:
+            cmd: python3 {{ iot_helper }} {{ iot_hass_vmid }}
+            stdin: |
+              set -e
+              {{ iot_api_fn }}
+              m=$(api GET /addons/core_silabs_multiprotocol/info)
+              z=$(api GET /addons/45df7312_zigbee2mqtt/info)
+              jq -cn --argjson m "$m" --argjson z "$z" '{
+                multipan_version: $m.data.version, device: $m.data.options.device,
+                baudrate: $m.data.options.baudrate, flow_control: $m.data.options.flow_control,
+                autoflash: $m.data.options.autoflash_firmware,
+                z2m_version: $z.data.version, z2m_data_path: $z.data.options.data_path}'
+          register: iot_meta_raw
+          changed_when: false
+
+        - name: Parse the add-on metadata
+          ansible.builtin.set_fact:
+            iot_meta: "{{ iot_meta_raw.stdout | from_json }}"
+            # The add-on's /config is HAOS's homeassistant/ folder, /share is share/.
+            iot_z2m_src: >-
+              {{ (iot_meta_raw.stdout | from_json).z2m_data_path
+                 | regex_replace('^/config/', 'homeassistant/') | regex_replace('^/share/', 'share/') }}
+
+        - name: Show the add-on metadata
+          ansible.builtin.debug:
+            var: iot_meta
+
+        - name: Require the same radio stack and serial settings as the add-on
+          ansible.builtin.assert:
+            that:
+              - iot_meta.multipan_version | string == iot_multipan_version | string
+              - iot_meta.device == iot_radio_device
+              - iot_meta.baudrate | int == iot_radio_baudrate | int
+              - iot_meta.flow_control | bool == iot_radio_flow_control | bool
+              # Never newer than the nixpkgs build (Z2M migrates its database forward only).
+              - iot_meta.z2m_version is version('2.14.3-99', '<=')
+              - iot_z2m_src is match('^(homeassistant|share)/')
+            fail_msg: >-
+              The add-ons do not match the pins (iot_multipan_version, iot_radio_by_id,
+              iot_radio_baudrate, iot_radio_flow_control; Z2M <= 2.14.3) or the Z2M data_path is unexpected.
+            quiet: true
+
+        # ── 2. Pull the state ───────────────────────────────────────────────
+        # zigbeed + Thread + Z2M's state files (not log/), uncompressed (HAOS has no gzip).
+        # Written straight to a 0600 file.
+        - name: Pull the state out of HAOS
+          ansible.builtin.command:
+            cmd: python3 {{ iot_helper }} {{ iot_hass_vmid }} --b64-out {{ iot_stage }}/state.tar
+            stdin: |
+              set -eo pipefail
+              cd {{ iot_haos_data }}
+              Z={{ iot_z2m_src | quote }}
+              test -s apps/data/core_silabs_multiprotocol/zigbeed/host_token.nvm
+              files=$(cd "$Z" && ls -1 *.yaml *.json database.db 2>/dev/null | sed "s|^|$Z/|")
+              tar -cf - apps/data/core_silabs_multiprotocol/zigbeed apps/data/core_silabs_multiprotocol/thread $files | base64
+          changed_when: true
+
+        - name: Create the extraction directory
+          ansible.builtin.file:
+            path: "{{ iot_stage }}/x"
+            state: directory
+            mode: "0700"
+
+        - name: Unpack the state on the host
+          ansible.builtin.unarchive:
+            src: "{{ iot_stage }}/state.tar"
+            dest: "{{ iot_stage }}/x"
+            remote_src: true
+
+        # ── 3. Check ────────────────────────────────────────────────────────
+        - name: Read the old Zigbee2MQTT configuration and coordinator backup
+          ansible.builtin.slurp:
+            src: "{{ iot_stage }}/x/{{ iot_z2m_src }}/{{ item }}"
+          loop: [configuration.yaml, coordinator_backup.json]
+          register: iot_sources
+          no_log: true
+
+        - name: Parse them
+          ansible.builtin.set_fact:
+            iot_old_z2m: "{{ iot_sources.results[0].content | b64decode | from_yaml }}"
+            iot_coordinator: "{{ iot_sources.results[1].content | b64decode | from_json }}"
+          no_log: true
+
+        - name: Find the state files
+          ansible.builtin.stat:
+            path: "{{ iot_stage }}/x/{{ item }}"
+          loop:
+            - apps/data/core_silabs_multiprotocol/zigbeed/host_token.nvm
+            - "{{ iot_z2m_src }}/database.db"
+            - "{{ iot_z2m_src }}/secret.yaml"
+          register: iot_state_files
+
+        - name: Require zigbeed's network state and the Z2M device database
+          ansible.builtin.assert:
+            that:
+              - iot_state_files.results[0].stat.exists and iot_state_files.results[0].stat.size > 0
+              - iot_state_files.results[1].stat.exists
+            fail_msg: zigbeed's host_token.nvm or Z2M's database.db is missing from the pulled state.
+            quiet: true
+
+        # A `!secret <key>` value in the old config lives in its secret.yaml.
+        - name: Read the old Zigbee2MQTT secrets file
+          ansible.builtin.slurp:
+            src: "{{ iot_stage }}/x/{{ iot_z2m_src }}/secret.yaml"
+          register: iot_old_secret_raw
+          when: iot_old_z2m.advanced.network_key | default('') is string
+          no_log: true
+
+        - name: Resolve the old network key
+          ansible.builtin.set_fact:
+            iot_old_network_key: >-
+              {{ (iot_old_secret_raw.content | b64decode | from_yaml)[iot_old_z2m.advanced.network_key.split(' ')[-1]]
+                 if iot_old_z2m.advanced.network_key | default('') is string
+                 else iot_old_z2m.advanced.network_key | default([]) }}
+          no_log: true
+
+        - name: Derive the expected parameters in each source's notation
+          ansible.builtin.set_fact:
+            iot_key_hex: "{% for b in iot_zigbee_network_key %}{{ '%02x' % (b | int) }}{% endfor %}"
+            iot_ext_hex: "{% for b in iot_zigbee_ext_pan_id %}{{ '%02x' % (b | int) }}{% endfor %}"
+            iot_ext_hex_rev: "{% for b in iot_zigbee_ext_pan_id | reverse %}{{ '%02x' % (b | int) }}{% endfor %}"
+            iot_old_pan: "{{ iot_old_z2m.advanced.pan_id | default('') }}"
+          no_log: true
+
+        - name: Require identical network parameters in the vault, the old config and the coordinator backup
+          ansible.builtin.assert:
+            that:
+              - iot_old_z2m.serial.adapter | default('') == 'ezsp'
+              # vault == old configuration.yaml
+              - iot_old_network_key | map('int') | list == iot_zigbee_network_key | map('int') | list
+              - >-
+                ((iot_old_pan | int(base=16)) if (iot_old_pan is string and iot_old_pan is match('^0[xX]'))
+                 else (iot_old_pan | int)) == iot_zigbee_pan_id_int | int
+              - iot_old_z2m.advanced.ext_pan_id | default([]) | map('int') | list == iot_zigbee_ext_pan_id | map('int') | list
+              - iot_old_z2m.advanced.channel | default(11) | int == iot_zigbee_channel | int
+              # vault == coordinator_backup.json (what the stack last reported)
+              - iot_coordinator.network_key.key | lower == iot_key_hex
+              - iot_coordinator.pan_id | int(base=16) == iot_zigbee_pan_id_int | int
+              - (iot_coordinator.extended_pan_id | lower) in [iot_ext_hex, iot_ext_hex_rev]
+              - iot_coordinator.channel | int == iot_zigbee_channel | int
+            fail_msg: >-
+              The Zigbee network parameters disagree between the vault (vault_iot_zigbee_*), the old
+              Z2M configuration.yaml and coordinator_backup.json, or the old adapter is not ezsp.
+              Starting Z2M like this could form a new network; nothing has been moved.
+            quiet: true
+          no_log: true
+
+        - name: Report the rehearsal result
+          ansible.builtin.debug:
+            msg: >-
+              Rehearsal passed: the pulled state matches the pins and the vault. HAOS, the radio and
+              CT112 were not touched.
+          when: iot_rehearse | bool
+
+        - name: Cut over
+          when: not (iot_rehearse | bool)
+          block:
+            # ── 4. Move the radio ───────────────────────────────────────────────
+            - name: Read the Home Assistant VM config
+              ansible.builtin.command: qm config {{ iot_hass_vmid }}
+              register: iot_hass_qm
+              changed_when: false
+
+            # USB is hot-pluggable by default, so this normally applies to the running VM.
+            - name: Detach the radio from Home Assistant
+              ansible.builtin.command: qm set {{ iot_hass_vmid }} --delete usb0
+              when: iot_hass_qm.stdout is search('(?m)^usb0:')
+              changed_when: true
+
+            - name: Check for a pending (not hot-applied) detach
+              ansible.builtin.command: qm pending {{ iot_hass_vmid }}
+              register: iot_hass_pending
+              changed_when: false
+
+            # With the guest agent, qm shutdown asks HAOS to power off cleanly.
+            - name: Power-cycle Home Assistant to apply the detach
+              ansible.builtin.shell: qm shutdown {{ iot_hass_vmid }} --timeout 300 && qm start {{ iot_hass_vmid }}
+              when: iot_hass_pending.stdout is search('(?m)^del usb0')
+              changed_when: true
+
+            - name: Wait for the radio on the host
+              ansible.builtin.wait_for:
+                path: "{{ iot_radio_device }}"
+                timeout: 120
+
+            - name: Restart CT112 to attach the radio
+              ansible.builtin.command: pct reboot {{ iot_vmid }}
+              changed_when: true
+
+            - name: Wait for CT112 and the radio inside it
+              ansible.builtin.command: pct exec {{ iot_vmid }} -- test -c {{ iot_radio_device }}
+              register: iot_ct_radio
+              until: iot_ct_radio.rc == 0
+              retries: 30
+              delay: 5
+              changed_when: false
+
+            # ── 5. Push the state into CT112 ────────────────────────────────────
+            - name: Stop the Zigbee services in CT112
+              ansible.builtin.command: pct exec {{ iot_vmid }} -- systemctl stop zigbee2mqtt.service docker-multipan.service
+              changed_when: true
+
+            - name: Push the state archive
+              ansible.builtin.command: pct push {{ iot_vmid }} {{ iot_stage }}/state.tar {{ iot_state_dir }}/state.tar --perms 0600
+              changed_when: true
+
+            # Replaces what is there (empty on a first run; the old copy with iot_force).
+            - name: Install the state
+              ansible.builtin.command:
+                argv:
+                  - pct
+                  - exec
+                  - "{{ iot_vmid }}"
+                  - --
+                  - /run/current-system/sw/bin/sh
+                  - -euc
+                  - |
+                    t=$(mktemp -d)
+                    trap 'rm -rf "$t" {{ iot_state_dir }}/state.tar' EXIT
+                    tar -xf {{ iot_state_dir }}/state.tar -C "$t"
+                    for d in zigbeed thread; do
+                      dest={{ iot_zigbeed_dir | dirname }}/$d
+                      find "$dest" -mindepth 1 -delete
+                      cp -a "$t/apps/data/core_silabs_multiprotocol/$d/." "$dest/"
+                      chown -R root:root "$dest"
+                    done
+                    z="$t/"{{ iot_z2m_src | quote }}
+                    for f in database.db coordinator_backup.json state.json; do
+                      rm -f {{ iot_z2m_dir }}/$f
+                      if [ -e "$z/$f" ]; then
+                        install -o zigbee2mqtt -g zigbee2mqtt -m 0600 "$z/$f" {{ iot_z2m_dir }}/$f
+                      fi
+                    done
+              changed_when: true
+
+            # The old config kept devices/groups inline (or in its own files); the NixOS module
+            # reads them from devices.yaml/groups.yaml, which Z2M then maintains itself.
+            - name: Read the old device and group files
+              ansible.builtin.slurp:
+                src: "{{ iot_stage }}/x/{{ iot_z2m_src }}/{{ iot_old_z2m[item] }}"
+              loop: [devices, groups]
+              register: iot_old_lists
+              when: iot_old_z2m[item] | default({}) is string
+
+            - name: Stage devices.yaml and groups.yaml
+              ansible.builtin.copy:
+                content: >-
+                  {{ (((item.content | b64decode | from_yaml) if item.content is defined
+                      else iot_old_z2m[item.item] | default({})) or {}) | to_nice_yaml(indent=2) }}
+                dest: "{{ iot_stage }}/{{ item.item }}.yaml"
+                mode: "0600"
+              loop: "{{ iot_old_lists.results }}"
+              loop_control:
+                label: "{{ item.item }}.yaml"
+
+            - name: Push devices.yaml and groups.yaml
+              ansible.builtin.command: >-
+                pct push {{ iot_vmid }} {{ iot_stage }}/{{ item }}.yaml {{ iot_state_dir }}/{{ item }}.yaml --perms 0600
+              loop: [devices, groups]
+              changed_when: true
+
+            # Owner by name inside the CT (the zigbee2mqtt user only exists in its NixOS).
+            - name: Install devices.yaml and groups.yaml
+              ansible.builtin.command: >-
+                pct exec {{ iot_vmid }} -- /run/current-system/sw/bin/sh -euc
+                'install -o zigbee2mqtt -g zigbee2mqtt -m 0600 {{ iot_state_dir }}/{{ item }}.yaml {{ iot_z2m_dir }}/{{ item }}.yaml
+                && rm -f {{ iot_state_dir }}/{{ item }}.yaml'
+              loop: [devices, groups]
+              changed_when: true
+
+            - name: Show the old settings that are not carried over automatically
+              ansible.builtin.debug:
+                msg:
+                  - Review these against files/nixos/configuration.nix and put what you want to keep in
+                    iot_z2m_extra_settings (roles/tenant/iot/defaults/main.yml or host_vars/iot.yml).
+                  - >-
+                    {{ iot_old_z2m | dict2items | rejectattr('key', 'in', iot_z2m_managed_keys + ['advanced']) | items2dict
+                       | combine({'advanced': iot_old_z2m.advanced | default({}) | dict2items
+                         | rejectattr('key', 'in', iot_z2m_managed_advanced) | items2dict}) }}
+
+      always:
+        # The staging copy holds the network key.
+        - name: Remove the staging directory
+          ansible.builtin.file:
+            path: "{{ iot_stage }}"
+            state: absent
+
+    # ── 6. Start ────────────────────────────────────────────────────────────
+    - name: Start the migrated stack
+      when: not (iot_rehearse | bool)
+      block:
+        - name: Mark the state as migrated
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ iot_vmid }}"
+              - --
+              - /run/current-system/sw/bin/sh
+              - -c
+              - "echo 'migrated from HAOS (multipan {{ iot_meta.multipan_version }}, z2m {{ iot_meta.z2m_version }})' > {{ iot_migrated_marker }}"
+          changed_when: true
+
+        - name: Start the radio stack
+          ansible.builtin.command: pct exec {{ iot_vmid }} -- systemctl start docker-multipan.service
+          changed_when: true
+
+        # The first start pulls the image; zigbeed listens once cpcd has reached the radio.
+        - name: Wait for zigbeed
+          ansible.builtin.command: pct exec {{ iot_vmid }} -- ss -Hltn sport = :9999
+          register: iot_ezsp
+          until: iot_ezsp.stdout | length > 0
+          retries: 60
+          delay: 10
+          changed_when: false
+
+        - name: Start Zigbee2MQTT
+          ansible.builtin.command: pct exec {{ iot_vmid }} -- systemctl start zigbee2mqtt.service
+          changed_when: true
+
+        - name: Wait for Zigbee2MQTT to start
+          ansible.builtin.command: pct exec {{ iot_vmid }} -- journalctl -u zigbee2mqtt.service -b --no-pager -o cat
+          register: iot_z2m_log
+          changed_when: false
+          until: iot_z2m_log.stdout is search('Zigbee2MQTT started')
+          retries: 30
+          delay: 10
+
+        - name: Show the Zigbee2MQTT startup log
+          ansible.builtin.debug:
+            msg: "{{ iot_z2m_log.stdout_lines[-40:] }}"

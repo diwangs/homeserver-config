@@ -1,0 +1,14 @@
+---
+# otbr-agent (multipan container) builds its forward firewall from ipsets, and wpan0 is a
+# TUN device. An unprivileged CT cannot load kernel modules, so load them on the host,
+# now and at boot.
+- name: Load the border router's kernel modules on the Proxmox host
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop:
+    - tun
+    - ip_set
+    - ip_set_hash_net
+  delegate_to: sentinel-lp

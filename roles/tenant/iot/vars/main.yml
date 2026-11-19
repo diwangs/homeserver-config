@@ -1,0 +1,46 @@
+---
+# Secrets and the Zigbee network identity come from the encrypted group_vars/all/vault.yml
+# and have no defaults: tasks/validate.yml fails the play before touching the guest when
+# one is missing. The `default(...)` only lets those asserts report the problem instead of
+# an undefined variable. See README.md, "Vault".
+#
+# The network parameters must be copied verbatim from the HAOS Zigbee2MQTT
+# configuration.yaml (`advanced:`); they must match what zigbeed holds, or Zigbee2MQTT
+# would form a new network. network_key is secret (only ever rendered into secret.yaml);
+# pan_id/ext_pan_id/channel are broadcast over the air and go into site.nix.
+iot_zigbee_network_key: "{{ vault_iot_zigbee_network_key | default([]) }}"
+iot_zigbee_pan_id: "{{ vault_iot_zigbee_pan_id | default('') }}"
+iot_zigbee_ext_pan_id: "{{ vault_iot_zigbee_ext_pan_id | default([]) }}"
+iot_zigbee_channel: "{{ vault_iot_zigbee_channel | default(0) }}"
+# pan_id may be written as a number or as a "0x1a62" hex string, as Z2M accepts both.
+iot_zigbee_pan_id_int: >-
+  {{ (iot_zigbee_pan_id | int(base=16)) if (iot_zigbee_pan_id is string and iot_zigbee_pan_id is match('^0[xX]'))
+     else (iot_zigbee_pan_id | int) }}
+
+# One broker login per client (files/nixos/configuration.nix, services.mosquitto).
+iot_mqtt_passwords:
+  z2m: "{{ vault_iot_mqtt_password_z2m | default('') }}"
+  hass: "{{ vault_iot_mqtt_password_hass | default('') }}"
+  frigate: "{{ vault_iot_mqtt_password_frigate | default('') }}"
+iot_z2m_frontend_token: "{{ vault_iot_z2m_frontend_token | default('') }}"
+
+# The radio: a /dev/serial/by-id path on sentinel-lp, passed into the CT as dev0 at the
+# same path (host_vars/iot.yml). Through hostvars because build_template.yml renders
+# site.nix from the Proxmox host's play.
+iot_radio_device: "{{ hostvars['iot'].iot_radio_by_id }}"
+iot_multipan_image: "homeassistant/amd64-addon-silabs-multiprotocol:{{ iot_multipan_version }}@{{ iot_multipan_digest }}"
+
+# Home Assistant (VM 200) on the backend: lease host_hass_v6 (hostid 24) in
+# host_vars/prydwen.yml. The only client admitted to the OTBR REST API.
+iot_hass_address: fd5a:715f:1edc:a703::24
+# Backend VLAN 3 (MQTT clients: HA, Frigate) and the whole home ULA range (Z2M frontend).
+iot_backend_prefix: fd5a:715f:1edc:a703::/64
+iot_lan_prefix: fd5a:715f:1edc:a700::/56
+
+# Keep in step with files/nixos/configuration.nix (tests/ checks them).
+iot_state_dir: /var/lib/iot
+iot_secrets_dir: /var/lib/iot/secrets
+iot_migrated_marker: /var/lib/iot/migrated
+iot_zigbeed_dir: /var/lib/multipan/zigbeed
+iot_thread_dir: /var/lib/multipan/thread
+iot_z2m_dir: /var/lib/zigbee2mqtt

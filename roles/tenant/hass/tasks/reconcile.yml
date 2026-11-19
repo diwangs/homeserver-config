@@ -8,4 +8,5 @@
     vmid: "{{ hass_vmid }}"
     cores: "{{ hass_cores }}"
     memory: "{{ hass_memory }}"
+    agent: "{{ hass_agent }}"
     update: true

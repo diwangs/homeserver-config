@@ -7,7 +7,7 @@ It has 2 1G NIC: `eno1` (`vmbr0`) and `enp3s0` (`vmbr1`).
 - The ISP has a /56 prefix delegation, which is divided this way:
   - 1 (default VLAN) -> infra
   - 2 -> internal
-  - 3 -> backend
+  - 3 -> backend (also the Thread border router's backbone: CT112 `iot`)
   - 4 -> iot
   - 5 -> guest
   - 6 -> dmz

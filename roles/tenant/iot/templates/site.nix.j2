@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+# Addresses, the pinned radio-stack image, the radio and the Zigbee network identity for
+# configuration.nix. JSON string literals are valid Nix strings, hence to_json.
+# NO secrets belong here: this file is copied into /nix/store (world-readable) and baked
+# into the image. The network key, MQTT passwords and the frontend token go to root-only
+# files via tasks/secrets.yml.
+{
+  multipanImage = {{ iot_multipan_image | to_json }};
+  multipanPrivileged = {{ iot_multipan_privileged | bool | lower }};
+  radioDevice = {{ iot_radio_device | to_json }};
+  radioBaudrate = {{ iot_radio_baudrate | int }};
+  radioFlowControl = {{ iot_radio_flow_control | bool | lower }};
+  hassAddress = {{ iot_hass_address | to_json }};
+  backendPrefix = {{ iot_backend_prefix | to_json }};
+  lanPrefix = {{ iot_lan_prefix | to_json }};
+  # Broadcast in every beacon; not secret. Must equal what zigbeed holds.
+  zigbee = {
+    panId = {{ iot_zigbee_pan_id_int | int }};
+    extPanId = [ {{ iot_zigbee_ext_pan_id | map('int') | join(' ') }} ];
+    channel = {{ iot_zigbee_channel | int }};
+  };
+  # iot_z2m_extra_settings (roles/tenant/iot/defaults/main.yml), as JSON.
+  z2mExtraSettings = builtins.fromJSON {{ iot_z2m_extra_settings | to_json(ensure_ascii=False) | to_json(ensure_ascii=False) }};
+}
