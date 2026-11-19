@@ -1,6 +1,6 @@
 ---
 # LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc. Replaces the
-# HAOS VM (VM 200); playbooks/migrate_hass.yml moves its state in (roles/tenant/hass/README.md).
+# HAOS VM (VM 200), whose /config was moved in once (roles/tenant/hass/README.md).
 proxmox_lxc:
   vmid: 113
   hostname: hass

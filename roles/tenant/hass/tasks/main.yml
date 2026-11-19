@@ -6,8 +6,8 @@
 # built the image (tasks/build_template.yml). The Docker engine and the homeassistant
 # container (virtualisation.oci-containers) live in files/nixos/configuration.nix.
 #
-# /config is NOT created here: playbooks/migrate_hass.yml copies it from HAOS and writes
-# the marker that lets the container start. HA's users, auth tokens and integration
+# /config is NOT created here: it came from HAOS once and is restored from a backup on a
+# rebuilt guest, then the marker that lets the container start is written (README). HA's users, auth tokens and integration
 # credentials live in /config/.storage, so this role holds no secrets.
 #
 # No Portainer: this guest is publicly reachable (through the edge) and Portainer would

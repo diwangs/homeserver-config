@@ -7,8 +7,9 @@
 # built the image (tasks/build_template.yml). The radio is a Proxmox device passthrough
 # (dev0 in host_vars/iot.yml), not something this role touches.
 #
-# The Zigbee state is NOT created here: playbooks/migrate_iot.yml copies it from HAOS and
-# writes the marker that lets the radio stack and Zigbee2MQTT start. Until then this
+# The Zigbee state is NOT created here: it came from HAOS once (and is restored by hand on
+# a rebuilt guest, see the README), and the marker that lets the radio stack and
+# Zigbee2MQTT start is written with it. Until then this
 # role only brings up Mosquitto.
 - name: Validate IoT inputs
   ansible.builtin.import_tasks: validate.yml

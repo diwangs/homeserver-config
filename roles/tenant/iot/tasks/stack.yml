@@ -6,18 +6,18 @@
     name: mosquitto.service
     state: "{{ 'restarted' if iot_mqtt_secrets is changed else 'started' }}"
 
-# The radio stack and Zigbee2MQTT may only start once playbooks/migrate_iot.yml has put
-# the HAOS state in place (their units carry the same condition).
+# The radio stack and Zigbee2MQTT may only start once the Zigbee state is in place and the
+# marker written (their units carry the same condition).
 - name: Check whether the Zigbee state has been migrated
   ansible.builtin.stat:
     path: "{{ iot_migrated_marker }}"
   register: iot_migrated
 
-- name: Report that the Zigbee services are waiting for the migration
+- name: Report that the Zigbee services are waiting for their state
   ansible.builtin.debug:
     msg: >-
       {{ iot_migrated_marker }} is missing: the radio stack and Zigbee2MQTT stay stopped until
-      playbooks/migrate_iot.yml has copied the HAOS state (roles/tenant/iot/README.md).
+      the Zigbee state is restored and the marker written (roles/tenant/iot/README.md).
   when: not iot_migrated.stat.exists
 
 - name: Start the radio stack

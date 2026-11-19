@@ -42,8 +42,7 @@ proxmox_lxc:
     - nesting=1 # Required to run docker, and by the Nix daemon's build sandbox
   # dev1: TUN for otbr-agent's wpan0 (present at first boot).
   # dev0: the SkyConnect, only once iot_radio_attached (see above). Applied by the
-  # reconcile in playbooks/configure.yml; takes effect on the next CT restart, which
-  # playbooks/migrate_iot.yml does.
+  # reconcile in playbooks/configure.yml; takes effect on the next CT restart.
   config_lines: >-
     {{ [{'key': 'dev1', 'value': '/dev/net/tun', 'at_create': true}]
        + ([{'key': 'dev0', 'value': iot_radio_by_id}] if iot_radio_attached else []) }}

@@ -1,8 +1,8 @@
 ---
 # Pinned Home Assistant Core release (ghcr.io/home-assistant/home-assistant), tag and
-# manifest-list digest together: never `latest` or `stable`. On the cutover it must equal
-# the Core version HAOS runs (playbooks/migrate_hass.yml checks it), because a newer Core
-# would migrate /config on first start and an older one may not read it.
+# manifest-list digest together: never `latest` or `stable`. Never older than the Core
+# that last wrote /config: a newer Core migrates /config on first start, an older one may
+# not read it (restore a backup made by the same or an older Core).
 # Upgrade procedure: read the release notes (breaking changes), take a backup (Settings ->
 # System -> Backups), bump both values, rerun playbooks/configure.yml --limit hass.
 # Digest: `skopeo inspect --raw docker://ghcr.io/home-assistant/home-assistant:<tag> | sha256sum`,
@@ -11,9 +11,9 @@ hass_version: 2026.11.2
 hass_image_digest: sha256:493a07e8f6530fc640223f4a0a5248f20a61ca2f718bb1d31efbf08a2c5ea28f
 
 # Extra TCP/UDP ports Home Assistant itself listens on for clients on the home ULA range,
-# beyond 8123 (e.g. HomeKit Bridge 21063-21070, emulated_hue 80/8300). The migration
-# rehearsal lists what HAOS listens on; add what an integration needs.
-# From the migration rehearsal (what HAOS's Core listened on):
+# beyond 8123 (e.g. HomeKit Bridge 21063-21070, emulated_hue 80/8300); add what an
+# integration needs (`ss -ltnup` in CT113 shows what HA listens on).
+# Carried over from what HAOS's Core listened on:
 #  - 18555/tcp: Core's built-in go2rtc, WebRTC media for camera streams in the frontend
 #  - 1900/udp: SSDP, where devices announce themselves (NOTIFY) for discovery
 hass_extra_tcp_ports: [18555]

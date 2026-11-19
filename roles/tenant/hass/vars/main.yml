@@ -3,9 +3,9 @@
 # (tests/ checks them).
 hass_state_dir: /var/lib/hass
 hass_config_dir: /var/lib/hass/config
-# Written by playbooks/migrate_hass.yml once the HAOS /config has been copied in. Until
-# then the container stays stopped: an empty /config would start onboarding and let
-# whoever reaches it first create the owner account.
+# Written by hand once a real /config is in place (README, "Restoring"). Until then the
+# container stays stopped: an empty /config would start onboarding and let whoever
+# reaches it first create the owner account.
 hass_migrated_marker: /var/lib/hass/migrated
 
 hass_image: "ghcr.io/home-assistant/home-assistant:{{ hass_version }}@{{ hass_image_digest }}"

@@ -5,13 +5,13 @@
 Home Assistant Core in **Container mode** on LXC 113 on the backend, public as
 `hass.us.example.org` through the BunkerWeb edge (`roles/tenant/bunkerweb`), which terminates
 TLS. It replaces the HAOS VM (VM 200, previously reached directly as `hass-us.example.org` with
-its own TLS add-on). The Zigbee/Thread/MQTT add-ons had already moved to the `iot` CT
-(`roles/tenant/iot`).
+its own TLS add-on; destroy that VM with `qm destroy 200` once you no longer want it as a
+fallback). The Zigbee/Thread/MQTT add-ons had already moved to the `iot` CT (`roles/tenant/iot`).
 
 | | |
 |---|---|
 | vmid / hostname | 113 / `hass` (unprivileged, `nesting=1`) |
-| backend address | `fd5a:715f:1edc:a703::24` + `192.168.3.24`, the VM's addresses (leases `host_hass_v6`/`_v4`, pinned DUID/IAID and MAC) |
+| backend address | `fd5a:715f:1edc:a703::24` + `192.168.3.24`, the old VM's addresses (leases `host_hass_v6`/`_v4`, pinned DUID/IAID and MAC) |
 | Guest OS | NixOS; `ghcr.io/home-assistant/home-assistant:<hass_version>@<hass_image_digest>` under `virtualisation.oci-containers`, `--network=host` |
 | Origin | plain HTTP :8123, admitted from the edge's ULA and the home LANs (nixos-fw) |
 | Auth | Home Assistant's own users, MFA and tokens, carried over in `/config/.storage`; no secrets in this repo |
@@ -51,55 +51,38 @@ there). If those files are missing, the card shows "Configuration error" (which 
 To upgrade, verify the release asset's sha256, replace the directory's contents, and bump the
 `?v=` on the resource (Settings → Dashboards → Resources) so browsers reload it.
 
-## Migration (one-off)
+## History
 
-`playbooks/migrate_hass.yml`, from sentinel-lp. It controls HAOS through the guest agent and
-the `ha` CLI, copies `/mnt/data/supervisor/homeassistant` from the stopped VM's disk (mapped
-read-only on the host), rewrites only the http settings and `external_url`, runs `check_config`
-in the pinned image, and starts the container. The VM disk is never written.
+Moved off the HAOS VM in November 2026 by a one-off playbook, since removed
+(`git show e1b4a21:playbooks/migrate_hass.yml`): it stopped Core and the VM, copied
+`/mnt/data/supervisor/homeassistant` from the VM's disk, and pointed the http settings and
+`external_url` at the edge. Things learned there that still matter:
 
-The http settings HA actually uses live in `/config/.storage/http` (migrated out of YAML once,
-`yaml_migration_done`); the `http:` block in `configuration.yaml` is rewritten too but is not
-what HA reads. If the stored ones are wrong, HA starts in recovery mode with them anyway
-(on HAOS that was port 443 with the add-on's certificate). The loader also requires
-`ssl_profile` to be present, so it is kept.
+- The http settings HA actually uses live in `/config/.storage/http` (migrated out of YAML once,
+  `yaml_migration_done`); the `http:` block in `configuration.yaml` mirrors them but is not what
+  HA reads. If the stored ones are unusable, HA starts in **recovery mode** with them anyway. The
+  loader also requires `ssl_profile` to be present, even without a certificate.
+- `www/community/` came over empty (see "Frontend cards").
 
-1. Cloudflare: create `hass.us.example.org` as a CNAME to `edge.us.example.org` (DNS only).
-   The `*.us` wildcard already covers it.
-2. `ansible-playbook playbooks/init_proxmox.yml --limit sentinel-lp` (creates CT113; until the
-   leases move it runs on dynamic addresses and HA stays stopped), then
-   `ansible-playbook playbooks/configure.yml --limit hass`.
-3. `ansible-playbook playbooks/migrate_hass.yml -e hass_rehearse=true`. It asserts that HAOS runs
-   `hass_version`, that no add-on outside `hass_haos_dropped_addons` is started, and dry-runs the
-   rewrite. Review what it prints: the add-on slugs (fix `hass_haos_dropped_addons` if the
-   file manager or TLS add-on has another slug), the ports HAOS listens on (carry what you need
-   into `hass_extra_*_ports`), and the `http:` block before/after.
-4. `ansible-playbook playbooks/migrate_hass.yml`: freezes HAOS (`ha core stop`, VM shutdown,
-   onboot off), copies, rewrites, checks and starts HA in CT113.
-5. `ansible-playbook playbooks/configure.yml --limit prydwen`: the `::24`/`.24` leases move to
-   CT113, `Allow-Hass` and the `hass-us` ddns updater go. Then `pct reboot 113` so the guest
-   takes those addresses.
-6. `ansible-playbook playbooks/configure.yml --limit hass,bunkerweb` (the edge site, and the
-   firewall with the final addresses).
-7. Delete the `hass-us` AAAA record in Cloudflare (ddns only stops updating it), and change the
-   server URL in the companion apps to `https://hass.us.example.org`.
-8. After it has run for a while: `qm destroy 200`.
+## Restoring
 
-**Rollback** (any step): `pct exec 113 -- systemctl stop docker-homeassistant`, revert
-`host_hass_v6`/`host_hass_v4` and re-add `Allow-Hass`/the ddns service if step 5 already ran,
-then `qm set 200 --onboot 1 && qm start 200`.
+`/config` is the only state. On a rebuilt CT113 (or after losing `/config`):
 
-Verify:
+1. `pct exec 113 -- systemctl stop docker-homeassistant` (it does not run without the marker
+   anyway).
+2. Unpack a Core backup (Settings → System → Backups; the archive's `homeassistant.tar.gz`) into
+   `/var/lib/hass/config`, as root. Use a backup made by the pinned `hass_version` or older.
+3. `pct exec 113 -- touch /var/lib/hass/migrated`, then
+   `ansible-playbook playbooks/configure.yml --limit hass` starts it.
 
-- In CT113: `docker logs homeassistant` has no `http`/`trusted_proxies` errors or failed
-  integrations; `curl -s -o /dev/null -w '%{http_code}' http://[::1]:8123/api/` prints `401`.
-- From outside the house (phone off Wi-Fi), over IPv4 and IPv6: `openssl s_client -connect
-  hass.us.example.org:443 -servername hass.us.example.org` shows `*.us.example.org`; logging in
-  with the existing user (and MFA) works; the companion app reconnects; HA's logbook/`ip_ban`
-  see the real client address, not the edge's.
-- MQTT (CT112, user `hass`), the OTBR integration (`:8081`, admitted from `::24` only) and the
-  Frigate entities update.
-- `hass-us.example.org` no longer resolves; 8123 on `::24` is refused from outside the LANs.
+## Verify
+
+- In CT113: `docker logs homeassistant` has no `http`/`trusted_proxies` errors and no recovery
+  mode; `curl -s -o /dev/null -w '%{http_code}' http://[::1]:8123/api/` prints `401`.
+- From outside the house, over IPv4 and IPv6: `openssl s_client -connect hass.us.example.org:443
+  -servername hass.us.example.org` shows `*.us.example.org`; login (and MFA) and the companion
+  app work; HA's log shows real client addresses, not the edge's.
+- MQTT (CT112, user `hass`) is connected, and the Frigate entities update.
 
 ## Upgrading
 
@@ -110,5 +93,4 @@ A newer Core migrates `/config` on first start; going back means restoring that 
 ## Tests
 
 `python3 -m unittest discover -s roles/tenant/hass/tests` evaluates the flake with a placeholder
-`site.nix` (skipped without Nix) and unit-tests the migration's `http:` rewrite
-(`files/rewrite_http.py`).
+`site.nix` (skipped without Nix).

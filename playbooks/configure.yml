@@ -78,14 +78,14 @@
     - role: dav
 
 # Zigbee radio stack, Thread border router, Mosquitto and Zigbee2MQTT. The Zigbee services
-# stay stopped until playbooks/migrate_iot.yml has copied the HAOS state in.
+# stay stopped until /var/lib/iot/migrated exists (roles/tenant/iot/README.md).
 - name: Configure IoT tenant
   hosts: iot
   roles:
     - role: iot
 
-# Home Assistant (Container mode). Stays stopped until playbooks/migrate_hass.yml has copied
-# the HAOS state in.
+# Home Assistant (Container mode). Stays stopped until /var/lib/hass/migrated exists
+# (roles/tenant/hass/README.md).
 - name: Configure Home Assistant tenant
   hosts: hass
   roles:

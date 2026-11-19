@@ -38,7 +38,7 @@ SkyConnect ──dev0──▶ docker-multipan (host network)
   IDs and channel are in `site.nix` (they are broadcast over the air anyway). Devices and groups
   are in `devices.yaml`/`groups.yaml`.
 - **Start gating**: `docker-multipan` and `zigbee2mqtt` only start once
-  `/var/lib/iot/migrated` exists (written by `playbooks/migrate_iot.yml`), and the radio stack
+  `/var/lib/iot/migrated` exists (written once, with the state; see "History"), and the radio stack
   also refuses an empty zigbeed directory. A fresh guest can therefore never bring up a blank
   stack, and Z2M can never form a new network. Mosquitto starts as soon as its passwords exist.
 - Same build/deploy shape as `roles/tenant/dav`: the flake in `files/nixos/` is the image,
@@ -48,8 +48,8 @@ SkyConnect ──dev0──▶ docker-multipan (host network)
 
 ## Vault
 
-Already filled in from HAOS (read through the guest agent, never printed). The migration
-re-checks every Zigbee value against the live HAOS state before it moves anything.
+Filled in from HAOS when the state moved here (read through the guest agent, never printed).
+The Zigbee values must keep matching what zigbeed holds.
 
 | Key | Value |
 |---|---|
@@ -64,54 +64,26 @@ Frigate reads its broker login from here too (`roles/tenant/frigate/vars/main.ym
 `iot_radio_by_id` (`host_vars/iot.yml`) is the SkyConnect's by-id path (the Multiprotocol add-on's
 `device` option; same USB descriptors, same path on the Proxmox host).
 
-## Migration
+## History
 
-`playbooks/migrate_iot.yml` does the whole cutover from sentinel-lp: it reaches HAOS through the
-QEMU guest agent of the HAOS VM (VM 200, since replaced by CT113 — `roles/tenant/hass`) and the Supervisor API, and CT112 with `pct`.
-No HA backup or manual HAOS step is involved.
+The state came from HAOS's add-ons (Silicon Labs Multiprotocol, Zigbee2MQTT, Mosquitto) by a
+one-off playbook, since removed (`git show e1b4a21:playbooks/migrate_iot.yml`). It pulled
+zigbeed's state, the Thread dataset and Z2M's data through the HAOS guest agent, checked the
+Zigbee parameters against the vault, the old Z2M config and the coordinator backup, moved the
+radio from VM 200 to CT112, and wrote the marker. HA then got the MQTT broker at
+`fd5a:715f:1edc:a703::2d:1883` (user `hass`) and the OTBR at
+`http://[fd5a:715f:1edc:a703::2d]:8081`.
 
-1. **Prepare** (no downtime):
-   `ansible-playbook playbooks/configure.yml --limit prydwen` (lease `host_iot`),
-   `ansible-playbook playbooks/init_proxmox.yml --limit sentinel-lp` (creates CT112 without the radio),
-   `ansible-playbook playbooks/configure.yml --limit sentinel-lp,iot`. Mosquitto is up; the
-   Zigbee services report that they are waiting for the migration.
-   **Check Docker device access** in the unprivileged CT:
-   `pct exec 112 -- docker run --rm --device=/dev/net/tun <multipan image> /bin/true`. If that
-   fails with a device/BPF permission error, set `iot_multipan_privileged: true`
-   (`host_vars/iot.yml`) and rerun `configure.yml --limit iot`.
-   **Rehearse**: `ansible-playbook playbooks/migrate_iot.yml -e iot_rehearse=true` pulls and checks
-   the state with the add-ons still running, and changes nothing.
-2. **Attach the radio to CT112's config**: set `iot_radio_attached: true` (`host_vars/iot.yml`) and
-   run `ansible-playbook playbooks/configure.yml --limit sentinel-lp`. This only adds `dev0`; it
-   takes effect on CT112's next restart (until the cutover, a CT112 restart would fail to start).
-3. **Cut over** (downtime starts): `ansible-playbook playbooks/migrate_iot.yml`. In order:
-   - sets the Z2M, Multiprotocol and Mosquitto add-ons to `boot: manual` and stops them;
-   - pulls zigbeed's state, the Thread dataset and Z2M's data (not its logs) into a root-only
-     directory, never printing them;
-   - checks the add-on version, radio path, baud rate and flow control against the pins
-     (Z2M at most 2.14.3), and that the Zigbee parameters agree across the vault, the old config
-     and the coordinator backup (adapter `ezsp`). Any mismatch stops it before the radio moves;
-   - hot-unplugs the radio from VM 200 (power-cycling VM 200 through the agent if the unplug
-     stays pending), restarts CT112, installs the state, devices.yaml and groups.yaml;
-   - writes the marker and starts the radio stack and Z2M, then shows Z2M's startup log and the
-     old Z2M settings that were not carried over (put the ones to keep into
-     `iot_z2m_extra_settings` and rerun `configure.yml --limit iot`).
-4. **Reconnect HA and Frigate**:
-   - Settings → Devices & services → MQTT → *Reconfigure*: broker `fd5a:715f:1edc:a703::2d`,
-     port 1883, user `hass`. Entities keep their IDs (discovery is keyed on the IEEE address).
-   - Open Thread Border Router: remove the entry discovered from the add-on, add
-     `http://[fd5a:715f:1edc:a703::2d]:8081`. The Thread integration should list the migrated
-     dataset as preferred.
-   - Frigate: `ansible-playbook playbooks/configure.yml --limit frigate` (it already points at
-     the iot broker, see above).
-5. **Clean up** after a few days: uninstall the three add-ons in HA.
+## Restoring
 
-**Rollback** (only soon after the cutover: the network's frame counter keeps advancing in CT112,
-and the HAOS copy falls behind): stop `zigbee2mqtt` and `docker-multipan` in CT112,
-`pct set 112 --delete dev0`, set `iot_radio_attached: false`, `qm set 200 --usb0 host=1-1`, and
-start the three add-ons again (and set them back to start on boot). Frigate then needs the
-old broker login back in `roles/tenant/frigate/vars/main.yml` (it was in the vault before
-this migration; see git history).
+The Zigbee network lives in `/var/lib/multipan/zigbeed` (key, PAN, **frame counter**) with Z2M's
+data in `/var/lib/zigbee2mqtt`, and the Thread dataset in `/var/lib/multipan/thread`. On a
+rebuilt CT112, put copies of those back (owners as before: root, and `zigbee2mqtt` for Z2M's
+directory) before writing `/var/lib/iot/migrated`, then run
+`ansible-playbook playbooks/configure.yml --limit iot`. Never write the marker on an empty
+zigbeed directory (the unit refuses it anyway): Z2M would form a new network and every device
+would have to be re-paired. A copy older than the running network has a lower frame counter,
+which devices may reject until it catches up, so restore the newest copy.
 
 ## Verify
 

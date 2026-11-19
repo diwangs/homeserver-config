@@ -41,9 +41,6 @@ playbooks/
   configure.yml          reconcile resources/mounts + deploy apps; safe to re-run any time
   init_openwrt.yml       first-run provisioning of the prydwen router
   upgrade_lxc_dist.yml   in-place Debian major upgrade of one tenant
-  migrate_hermes.yml     one-off: split the Matrix gateway out of hermes into CT108
-  migrate_iot.yml        one-off: move the Zigbee/Thread state from the HAOS add-ons into CT112
-  migrate_hass.yml       one-off: move Home Assistant from the HAOS VM into CT113 (Container mode)
 roles/
   host/                 physical host, router, and guest provisioning
     proxmox_lxc, proxmox_templates, zfs, hd_idle, clat, prydwen,

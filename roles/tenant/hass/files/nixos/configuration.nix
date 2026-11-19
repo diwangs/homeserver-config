@@ -15,17 +15,17 @@ let
   # ── State ─────────────────────────────────────────────────────────────────
   # Keep in step with roles/tenant/hass/vars/main.yml (tests/ checks them).
   stateDir = "/var/lib/hass";
-  # HAOS's /mnt/data/supervisor/homeassistant, copied in by playbooks/migrate_hass.yml.
+  # HAOS's /mnt/data/supervisor/homeassistant, copied in once at the migration.
   # On the rootfs (SSD), not ZFS: the recorder writes constantly.
   configDir = "${stateDir}/config";
-  # Written by the migration once configDir holds the HAOS state. An empty /config would
+  # Written by hand once configDir holds real state (README). An empty /config would
   # start onboarding and hand the owner account to whoever reaches the page first.
   migratedMarker = "${stateDir}/migrated";
 
   # HA's HTTP server, plain HTTP. No TLS on this guest: the public edge
   # (roles/tenant/bunkerweb, CT110) terminates TLS with the *.us wildcard and proxies here
-  # over the router's dmz -> backend forwarding. configuration.yaml trusts X-Forwarded-For
-  # from the edge only (http.trusted_proxies, set by the migration).
+  # over the router's dmz -> backend forwarding. HA trusts X-Forwarded-For from the edge
+  # only (http.trusted_proxies in /config/.storage/http).
   httpPort = 8123;
 
   # Refuse to start on a /config without HA's auth store even if the marker is there
@@ -110,9 +110,8 @@ in
   # Overrides proxmox-lxc.nix's default of a socket-activated sshd.
   services.openssh.enable = false;
 
-  # Ansible needs an interpreter on the target; NixOS ships none by default. Python and
-  # curl are also used by playbooks/migrate_hass.yml; sqlite is for inspecting the
-  # recorder database by hand.
+  # Ansible needs an interpreter on the target; NixOS ships none by default. curl and
+  # sqlite are for checking the API and inspecting the recorder database by hand.
   environment.systemPackages = [
     pkgs.python3
     pkgs.curl
@@ -171,7 +170,7 @@ in
   };
 
   # A failed condition just skips the unit (not a failure), so the first boot of a fresh
-  # image is quiet; the migration starts the container once the state is in place.
+  # image is quiet; Ansible starts the container once the marker exists.
   systemd.services.docker-homeassistant = {
     unitConfig.ConditionPathExists = migratedMarker;
     serviceConfig.ExecStartPre = lib.mkAfter [ "${requireConfig}/bin/hass-require-config" ];

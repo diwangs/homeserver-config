@@ -15,11 +15,11 @@ let
   # ── State ─────────────────────────────────────────────────────────────────
   # Keep in step with roles/tenant/iot/vars/main.yml (tests/ checks them).
   stateDir = "/var/lib/iot";
-  # Written by playbooks/migrate_iot.yml once the HAOS state has been copied in. Until
-  # then neither the radio stack nor Zigbee2MQTT may start: zigbeed with an empty
-  # working directory would bring up a blank Zigbee stack, and Z2M facing parameters the
-  # stack does not have would form a NEW network — the one thing this migration must
-  # never do.
+  # Written once the Zigbee state is in place (it was moved here from HAOS once; see the
+  # README for restoring). Until then neither the radio stack nor Zigbee2MQTT may start:
+  # zigbeed with an empty working directory would bring up a blank Zigbee stack, and Z2M
+  # facing parameters the stack does not have would form a NEW network — which would
+  # orphan every paired device.
   migratedMarker = "${stateDir}/migrated";
   # Runtime-only credentials (tasks/secrets.yml), root-only. Plain strings on purpose:
   # a Nix `path` literal would be copied into the store.
@@ -291,8 +291,8 @@ in
         port = "tcp://127.0.0.1:${toString ezspPort}";
         adapter = "ezsp";
       };
-      # Must equal what zigbeed holds (tasks in playbooks/migrate_iot.yml compare them
-      # with the HAOS config and coordinator backup before anything starts).
+      # Must equal what zigbeed holds (they were checked against the HAOS config and the
+      # coordinator backup when the state moved here).
       advanced = {
         network_key = "!secret network_key";
         pan_id = site.zigbee.panId;
