@@ -49,8 +49,8 @@ roles/
   common/               shared in-guest building blocks
     docker_host, portainer, cifs_mount, journald, disable_ssh
   tenant/               one role per tenant service
-    hass, nas, omada, frigate, nextcloud, seedbox, immich, matrix, hermes, hermes_gateway,
-    seafile, bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md)
+    hass, nas, omada, frigate, seedbox, immich, matrix, hermes, hermes_gateway,
+    seafile, dav (Radicale), bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md)
   maintenance/
     debian_dist_upgrade used by playbooks/upgrade_lxc_dist.yml
 docs/network.md          network design notes

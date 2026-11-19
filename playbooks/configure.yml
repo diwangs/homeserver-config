@@ -46,11 +46,6 @@
   roles:
     - role: frigate
 
-- name: Configure Nextcloud tenant
-  hosts: nextcloud
-  roles:
-    - role: nextcloud
-
 - name: Configure seedbox tenant
   hosts: seedbox
   roles:
@@ -81,7 +76,12 @@
   roles:
     - role: seafile
 
-# The public HTTP(S) edge for matrix, hermes and seafile. After the origins, so a first
+- name: Configure Radicale (dav) tenant
+  hosts: dav
+  roles:
+    - role: dav
+
+# The public HTTP(S) edge for matrix, hermes, seafile and dav. After the origins, so a first
 # run finds them already serving plain HTTP on :80.
 - name: Configure BunkerWeb tenant
   hosts: bunkerweb

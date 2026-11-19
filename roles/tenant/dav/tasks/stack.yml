@@ -1,0 +1,18 @@
+---
+# The container unit skips itself while the users file is missing, and a unit that is
+# already running keeps the file it was started with only until the process re-reads
+# it, so make sure the unit is up after the rebuild and restarted when the credentials
+# just changed on an existing guest.
+
+# mp0 only exists if the LXC was created with it; without the mount, Docker would
+# silently create the bind source on the rootfs and the collections would land there.
+# The unit has the same guard (ExecStartPre); this one fails the play with a clear task.
+- name: Verify the Radicale data directory is a mountpoint
+  ansible.builtin.command: mountpoint -q {{ dav_data_dir }}
+  changed_when: false
+  check_mode: false
+
+- name: Start the Radicale container
+  ansible.builtin.systemd_service:
+    name: docker-radicale.service
+    state: "{{ 'restarted' if (dav_users is changed and dav_users_before.stat.exists) else 'started' }}"

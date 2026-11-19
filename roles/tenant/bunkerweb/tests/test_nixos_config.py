@@ -28,15 +28,22 @@ SITE = """{
   matrixHostName = "matrix.us.example.org";
   hermesHostName = "hermes.us.example.org";
   seafileHostName = "seafile.us.example.org";
+  davHostName = "dav.us.example.org";
   matrixUpstream = "fd5a:715f:1edc:a706::27";
   hermesUpstream = "fd5a:715f:1edc:a706::29";
   seafileUpstream = "fd5a:715f:1edc:a706::2a";
+  davUpstream = "fd5a:715f:1edc:a706::2c";
   uiBindAddress = "fd5a:715f:1edc:a706::2b";
   frigateWebrtcUpstream = "fd5a:715f:1edc:a706::22";
 }
 """
 FLAKE_ARGS = ["--no-update-lock-file", "--extra-experimental-features", "nix-command flakes"]
-HOSTS = ("matrix.us.example.org", "hermes.us.example.org", "seafile.us.example.org")
+HOSTS = (
+    "matrix.us.example.org",
+    "hermes.us.example.org",
+    "seafile.us.example.org",
+    "dav.us.example.org",
+)
 
 
 def stage():
@@ -147,6 +154,7 @@ class NixosConfig(unittest.TestCase):
                 "matrix.us.example.org": "http://[fd5a:715f:1edc:a706::27]",
                 "hermes.us.example.org": "http://[fd5a:715f:1edc:a706::29]",
                 "seafile.us.example.org": "http://[fd5a:715f:1edc:a706::2a]",
+                "dav.us.example.org": "http://[fd5a:715f:1edc:a706::2c]",
             },
         )
         for h in HOSTS:
@@ -158,6 +166,8 @@ class NixosConfig(unittest.TestCase):
         self.assertIn("PUT", e["matrix.us.example.org_ALLOWED_METHODS"].split("|"))
         self.assertEqual(e["matrix.us.example.org_MAX_CLIENT_SIZE"], "20m")
         self.assertEqual(e["hermes.us.example.org_REVERSE_PROXY_WS"], "yes")
+        self.assertIn("PROPFIND", e["dav.us.example.org_ALLOWED_METHODS"].split("|"))
+        self.assertIn("MKCALENDAR", e["dav.us.example.org_ALLOWED_METHODS"].split("|"))
         self.assertEqual(e["seafile.us.example.org_MAX_CLIENT_SIZE"], "0")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_URL_1"], "/seafhttp")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_MODSECURITY_1"], "no")

@@ -105,6 +105,18 @@ let
       REVERSE_PROXY_READ_TIMEOUT_1 = "1200s";
       REVERSE_PROXY_SEND_TIMEOUT_1 = "1200s";
     };
+
+    # Radicale (CalDAV/CardDAV): WebDAV methods, small bodies (contacts, events, photos
+    # inside vCards). 401 is not counted as bad behavior: clients probe unauthenticated
+    # before sending credentials. Brute force is slowed by Radicale's own failed-login
+    # delay plus the request limit here. The CRS knows nothing about WebDAV, so expect
+    # DetectionOnly noise on PROPFIND/REPORT until the engine is switched to On.
+    ${site.davHostName} = common // {
+      REVERSE_PROXY_HOST = "http://[${site.davUpstream}]";
+      ALLOWED_METHODS = "GET|POST|HEAD|PUT|DELETE|OPTIONS|PROPFIND|PROPPATCH|REPORT|MKCOL|MKCALENDAR|COPY|MOVE";
+      MAX_CLIENT_SIZE = "50m";
+      LIMIT_REQ_RATE = "30r/s";
+    };
   };
 
   # The scheduler is the single configuration source (docker integration without

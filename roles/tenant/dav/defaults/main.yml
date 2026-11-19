@@ -1,0 +1,7 @@
+---
+# Pinned release of the upstream image (ghcr.io/kozea/radicale): never a floating tag.
+# Upgrade procedure: read the release notes at https://github.com/Kozea/Radicale/releases,
+# compare the upstream Dockerfile (user, VOLUME, CMD) with files/nixos/configuration.nix,
+# snapshot the dataset, bump this, and rerun playbooks/configure.yml --limit dav.
+# Rendered into the guest's site.nix (templates/site.nix.j2).
+dav_version: 3.9.2

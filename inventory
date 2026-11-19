@@ -16,7 +16,6 @@ sentinel-lp ansible_host=fd5a:715f:1edc:a703::10
 nas ansible_host=fd5a:715f:1edc:a703::20
 omada ansible_host=fd5a:715f:1edc:a703::21
 frigate ansible_host=fd5a:715f:1edc:a703::22
-nextcloud ansible_host=fd5a:715f:1edc:a706::23
 seedbox ansible_host=fd5a:715f:1edc:a703::25
 immich ansible_host=fd5a:715f:1edc:a703::26
 matrix ansible_host=fd5a:715f:1edc:a706::27
@@ -24,11 +23,11 @@ hermes ansible_host=fd5a:715f:1edc:a703::28
 hermes-gateway ansible_host=fd5a:715f:1edc:a706::29
 seafile ansible_host=fd5a:715f:1edc:a706::2a
 bunkerweb ansible_host=fd5a:715f:1edc:a706::2b
+dav ansible_host=fd5a:715f:1edc:a706::2c
 
 # Debian tenants running Docker (roles/common/docker_host); per-host network params in host_vars.
 [lxc_docker]
 frigate
-nextcloud
 immich
 
 # NixOS tenants: no apt, no dist-upgrade; see group_vars/lxc_nixos.yml.
@@ -38,3 +37,4 @@ hermes
 hermes-gateway
 seafile
 bunkerweb
+dav

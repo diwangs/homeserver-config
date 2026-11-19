@@ -1,0 +1,22 @@
+---
+# Fail fast, before anything is changed in the guest: without a users file Radicale
+# would refuse every login (or, with a malformed one, fail to start).
+- name: Require the Radicale htpasswd entry
+  ansible.builtin.assert:
+    that:
+      # One `user:$2y$...` bcrypt line (htpasswd -nbB), no whitespace or line breaks.
+      - dav_htpasswd_line is match('^[A-Za-z0-9_.-]{1,32}:\$2[abxy]\$[0-9]{2}\$[A-Za-z0-9./]{53}$')
+    fail_msg: >-
+      Missing or invalid vault_dav_htpasswd in group_vars/all/vault.yml: expected one
+      bcrypt line `user:$2y$...`, e.g. from `htpasswd -nbB user password`. See
+      roles/tenant/dav/README.md.
+    quiet: true
+  no_log: true
+
+- name: Require the public hostname
+  ansible.builtin.assert:
+    that: dav_hostname is match('^dav\.us\..+')
+    fail_msg: >-
+      dav_hostname (group_vars/all/vars.yml) must sit directly under us.<public_domain>,
+      which is all the edge's wildcard certificate covers; check vault_public_domain.
+    quiet: true

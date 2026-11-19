@@ -33,11 +33,12 @@ matrix_server_name: "{{ vault_matrix_server_name }}" # Matrix identity suffix, N
 acme_email: "{{ vault_acme_email }}"
 hermes_matrix_allowed_users: "{{ vault_hermes_matrix_allowed_users }}" # rendered into the hermes site.nix
 hass_hostname: "hass-us.{{ public_domain }}"
-nextcloud_hostname: "nextcloud.{{ public_domain }}"
+nextcloud_hostname: "nextcloud.{{ public_domain }}"  # Nextcloud is shut down; kept only so the router removes its leftover ddns record
 frigate_webrtc_hostname: "frigate-webrtc.us.{{ public_domain }}"
 matrix_hostname: "matrix.us.{{ public_domain }}"
 hermes_hostname: "hermes.us.{{ public_domain }}"
 seafile_hostname: "seafile.us.{{ public_domain }}"
+dav_hostname: "dav.us.{{ public_domain }}"
 # The BunkerWeb edge (roles/tenant/bunkerweb). ddns keeps its A/AAAA current; the *.us
 # service names (and frigate_webrtc_hostname) are CNAMEs to it.
 edge_hostname: "edge.us.{{ public_domain }}"

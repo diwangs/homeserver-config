@@ -129,9 +129,9 @@ prydwen_uci_absent_sections:
     type: route6
     find:
       target: 64:ff9a::/96
-  # The blanket WAN->DMZ forwarding. Replaced by per-host rules (rule_bunkerweb,
-  # rule_nextcloud), so only the BunkerWeb edge and Nextcloud are reachable from the
-  # internet. The edge serves the *.us services and relays Frigate's WebRTC media.
+  # The blanket WAN->DMZ forwarding. Replaced by a per-host rule (rule_bunkerweb), so only the
+  # BunkerWeb edge is reachable from the internet in the dmz. The edge serves the *.us services
+  # and relays Frigate's WebRTC media.
   - config: firewall
     type: forwarding
     find:
@@ -152,6 +152,20 @@ prydwen_uci_absent_sections:
     type: service
     find:
       lookup_host: "{{ seafile_hostname }}"
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ dav_hostname }}"
+  # Nextcloud is shut down (CT103 stays in Proxmox, stopped and not autostarted): its direct
+  # public exposure (own TLS, not behind the edge) and its ddns record are removed.
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ nextcloud_hostname }}"
+  - config: firewall
+    type: rule
+    find:
+      name: Allow-Nextcloud
   # Frigate's WebRTC media is relayed over TCP by the BunkerWeb edge (port 8555, then go2rtc
   # on frigate's dmz NIC), so its direct opening and its ddns record go too.
   - config: ddns
@@ -712,6 +726,18 @@ prydwen_uci_sections:
       hostid: "2b"
       duid: ["00020000ab1162756e6b6572006e%62756e6b"]
       mac: ["BC:24:11:B0:0B:6E"]
+  # Radicale (CT111, dmz). Assigned, not discovered, like seafile: the NixOS guest pins
+  # this exact DUID/IAID in its image (roles/tenant/dav/files/nixos/configuration.nix), and
+  # hwaddr is pinned in host_vars/dav.yml.
+  - config: dhcp
+    type: host
+    name: host_dav
+    find: { name: dav }
+    value:
+      leasetime: 10m
+      hostid: "2c"
+      duid: ["00020000ab11726164696361006f%72616469"]
+      mac: ["BC:24:11:DA:0D:2C"]
   - config: dhcp
     type: host
     name: host_vertibird_ap_v6
@@ -924,19 +950,6 @@ prydwen_uci_sections:
       dest_port: "64555"
       target: DNAT
       family: ipv4
-  # Exception: Nextcloud AIO terminates its own TLS (not behind the edge).
-  - config: firewall
-    type: rule
-    name: rule_nextcloud
-    find: { name: Allow-Nextcloud }
-    value:
-      proto: [tcp]
-      src: wan
-      dest: dmz
-      dest_port: "80 443"
-      target: ACCEPT
-      family: ipv6
-      dest_ip: ["0:0:0:6::23/-56"]
   - config: firewall
     type: rule
     name: rule_hass
@@ -993,29 +1006,6 @@ prydwen_uci_sections:
         \"@['device']['{{ prydwen_backend_device }}']['leases'][@.hostname='hass']['ipv6-addr'][0]['address']\""
       interface: wan
       force_ipversion: "1"
-      use_syslog: "2"
-      check_unit: minutes
-      force_unit: minutes
-      retry_unit: seconds
-  - config: ddns
-    type: service
-    name: dockerdmz
-    find: { lookup_host: "{{ nextcloud_hostname }}" }
-    secret: true
-    value:
-      service_name: cloudflare.com-v4
-      use_ipv6: "1"
-      enabled: "1"
-      domain: "nextcloud@{{ public_domain }}"
-      username: Bearer
-      password: "{{ prydwen_cloudflare_api_token }}"
-      use_https: "1"
-      cacert: /etc/ssl/certs
-      ip_source: script
-      ip_script: >-
-        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='nextcloud']['ipv6-addr'][0]['address']\""
-      interface: wan
       use_syslog: "2"
       check_unit: minutes
       force_unit: minutes

@@ -1,0 +1,26 @@
+---
+# Reconcile the running Radicale guest. Runs in-guest via `pct exec` through the Proxmox
+# host (group_vars/tenant_lxc.yml), from playbooks/configure.yml.
+#
+# Same shape as roles/tenant/seafile: one flake tree and one `nixos-rebuild`. The same
+# tree built the image (tasks/build_template.yml). The Docker engine and the radicale
+# container (virtualisation.oci-containers) live in files/nixos/configuration.nix.
+#
+# Storage is not mounted here: the collections directory is a host bind-mount provided
+# at the LXC level (see host_vars/dav.yml).
+#
+# No Portainer: this guest is publicly reachable and Portainer would add an admin
+# surface holding the Docker socket.
+- name: Validate Radicale inputs
+  ansible.builtin.import_tasks: validate.yml
+
+# Before the rebuild: the container unit skips itself (ConditionPathExists) until the
+# htpasswd file exists, so it must be in place when the stack first starts.
+- name: Install the Radicale users file
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Deploy the Radicale NixOS configuration
+  ansible.builtin.import_tasks: nixos.yml
+
+- name: Start the Radicale container
+  ansible.builtin.import_tasks: stack.yml

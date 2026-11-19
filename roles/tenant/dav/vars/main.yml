@@ -1,0 +1,12 @@
+---
+# The secret comes from the encrypted group_vars/all/vault.yml. It has no default:
+# tasks/validate.yml fails the play before touching the guest when it is missing. The
+# `default('')` only lets that assert report the problem instead of an undefined variable.
+# It is rendered only into a root-only runtime file (tasks/secrets.yml), never into the
+# flake tree, the image or the Nix store.
+dav_htpasswd_line: "{{ vault_dav_htpasswd | default('') }}"
+
+# Keep in step with mp0 in host_vars/dav.yml and with dataDir / secretsDir in
+# files/nixos/configuration.nix (tests/ checks them).
+dav_data_dir: /mnt/radicale
+dav_secrets_dir: /var/lib/dav/secrets

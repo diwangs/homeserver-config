@@ -11,17 +11,18 @@ bad-behavior bans) on LXC 110 in the dmz, the TLS-terminating edge for:
 | `matrix.us.example.org` | matrix (CT106) `fd5a:715f:1edc:a706::27` — nginx → tuwunel |
 | `hermes.us.example.org` | hermes-gateway (CT108) `fd5a:715f:1edc:a706::29` — nginx → CT107 dashboard |
 | `seafile.us.example.org` | seafile (CT109) `fd5a:715f:1edc:a706::2a` — Seafile's own nginx |
+| `dav.us.example.org` | dav (CT111) `fd5a:715f:1edc:a706::2c` — Radicale, CalDAV/CardDAV, via a host nginx stream relay |
 
 It also relays **Frigate's WebRTC media** (`frigate-webrtc.us.example.org:8555`, TCP only) at L4
 with an nginx stream server to go2rtc on Frigate's dmz ULA (`bunkerweb_frigate_webrtc_upstream`,
 `fd5a:715f:1edc:a706::22`). BunkerWeb itself is not involved (it is not HTTP).
 
-**Not behind the edge, by decision:** `hass-us.example.org` (KVM on backend, `Allow-Hass`) and
-`nextcloud.example.org` (AIO terminates its own TLS, `Allow-Nextcloud`). Both are IPv6-only.
+**Not behind the edge, by decision:** `hass-us.example.org` (KVM on backend, `Allow-Hass`), IPv6-only.
+Nextcloud used to be the other exception; it is shut down and no longer exposed.
 
 ## How traffic arrives
 
-- **DNS**: `matrix.us`, `hermes.us`, `seafile.us` and `frigate-webrtc.us` are **CNAMEs** to
+- **DNS**: `matrix.us`, `hermes.us`, `seafile.us`, `dav.us` and `frigate-webrtc.us` are **CNAMEs** to
   `edge.us.example.org` (`edge_hostname`), whose records the router's ddns keeps current:
   AAAA from the edge's dmz lease (`ddns.edge`), A from the router's WAN address (`ddns.edge4`).
   Both records must already exist in Cloudflare (ddns updates, it does not create).
@@ -87,8 +88,7 @@ unencrypted; put it behind TLS before using it from untrusted segments.
 
 nixos-fw opens only 8555 (the WebRTC relay is a host nginx). BunkerWeb's 80/443 are Docker-published
 (DNAT bypasses nixos-fw), so what may reach them is decided by the router: `Allow-BunkerWeb` for
-IPv6 and the `DNAT-BunkerWeb-*` forwards (into Jool) for IPv4. Nothing else from wan reaches the dmz except
-`Allow-Nextcloud`.
+IPv6 and the `DNAT-BunkerWeb-*` forwards (into Jool) for IPv4. Nothing else from wan reaches the dmz.
 
 ## Settings that matter
 
@@ -112,10 +112,10 @@ IPv6 and the `DNAT-BunkerWeb-*` forwards (into Jool) for IPv4. Nothing else from
 ## Trade-offs accepted
 
 - **The home addresses are public**: `edge.us` publishes the router's IPv4 and the edge's GUA, and
-  the Nextcloud/hass records publish the `/56`. A volumetric flood would saturate the home line
+  the hass record publishes the `/56`. A volumetric flood would saturate the home line
   (the ISP is the only mitigation); the realistic risks are application-level, which the WAF
   covers once ModSecurity is switched from `DetectionOnly` to `On`.
-- **Nextcloud and Home Assistant are IPv6-only** for now; IPv4-only clients cannot reach them.
+- **Home Assistant is IPv6-only** for now; IPv4-only clients cannot reach them.
 - **Remote WebRTC is TCP-only**, so it stalls more than UDP on lossy mobile networks. LAN clients
   still use UDP on the dmz ULA.
 
@@ -149,7 +149,7 @@ exists. The same token also controls the router's DDNS records.
    `ansible-playbook playbooks/configure.yml --limit sentinel-lp,bunkerweb`. Wait for the wildcard
    certificate in `docker logs bunkerweb-scheduler`.
 4. Point `matrix.us`, `hermes.us`, `seafile.us` and `frigate-webrtc.us` at `edge.us` as CNAMEs
-   (delete their old A/AAAA first); delete `nextcloud`'s stale A record (Nextcloud is IPv6-only).
+   (delete their old A/AAAA first).
 5. Origins and Frigate: `configure.yml --limit matrix,hermes,hermes-gateway,seafile,frigate`.
 
 Verify (from outside the house, ideally a phone off Wi-Fi):
@@ -158,7 +158,7 @@ Verify (from outside the house, ideally a phone off Wi-Fi):
 - `docker logs bunkerweb` shows real client addresses on both families.
 - federationtester passes, a Seafile client syncs a large file, the Hermes dashboard and its
   websocket work, and remote camera viewing in the HA app connects (TCP).
-- From outside, the origins' GUAs refuse 80/443; hass and nextcloud still answer.
+- From outside, the origins' GUAs refuse 80/443; hass still answers.
 
 ## Upgrading
 

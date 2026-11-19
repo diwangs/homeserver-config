@@ -1,0 +1,48 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 111
+  hostname: dav
+  # Not a pveam Debian image: a NixOS tarball built from roles/tenant/dav/files/nixos by
+  # roles/tenant/dav/tasks/build_template.yml, which runs right before the create task.
+  template: nixos
+  template_role: dav
+  # ostype=nixos stops Proxmox applying its Debian-style guest fixups.
+  ostype: nixos
+  nixos_path_shim: true
+  # Nix store + the Radicale image (~0.2 GB). The collections live on ZFS (mp0).
+  # Grow later with `pct resize 111 rootfs +NG`.
+  disk: local-lvm:8
+  cores: 1
+  # Radicale idles well under 100 MB; the headroom is for nixos-rebuild evaluation,
+  # which is the memory-hungriest thing this guest does.
+  memory: 1024
+  swap: 512
+  netif:
+    # dmz (VLAN 6) — the zone is already forwarded from wan (see host_vars/prydwen.yml
+    # forward_wan_dmz), so a public service needs no per-service firewall rule.
+    # ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix (which also pins the DHCPv6 DUID/IAID the router's
+    # reservation matches) rather than pushed in with pct exec.
+    # hwaddr is pinned so the router's lease (matched on mac as well as duid) stays
+    # valid if the container is ever recreated.
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual,hwaddr=BC:24:11:DA:0D:2C"
+  unprivileged: true
+  features:
+    - nesting=1 # Required to run docker, and by the Nix daemon's build sandbox
+    # No fuse: no borg job; the collections sit on the pool and are covered by its snapshots.
+  # Collections on the encrypted RAID-Z pool. No idmap: the Radicale image runs as uid
+  # 1000 inside the container, which an unprivileged CT maps to host uid 101000, so the
+  # directory is owned by that uid.
+  host_dirs:
+    - path: /mnt/frontpanel-pool/frontpanel-dataset/Radicale
+      owner: "101000"
+      group: "101000"
+      mode: "0750"
+  config_lines:
+    # Keep in step with dataDir in files/nixos/configuration.nix.
+    # at_create: present at first boot, so no `pct reboot` is needed.
+    - key: mp0
+      value: /mnt/frontpanel-pool/frontpanel-dataset/Radicale,mp=/mnt/radicale
+      at_create: true
+  # No networkd_interfaces: eth6 addressing ships inside the NixOS image.

@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# Public identity, edge address and pinned image tag for configuration.nix. The hostname
+# comes from the vault (group_vars/all/vars.yml) so it never sits in the committed flake
+# tree. JSON string literals are valid Nix strings, hence to_json.
+# NO secrets belong here: this file is copied into /nix/store (world-readable) and
+# baked into the image. The htpasswd file goes to a root-only path via tasks/secrets.yml.
+{
+  hostName = {{ dav_hostname | to_json }};
+  # The public edge (roles/tenant/bunkerweb), the only client allowed on port 80.
+  edgeAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
+  radicaleVersion = {{ dav_version | string | to_json }};
+}

@@ -12,10 +12,12 @@
   matrixHostName = {{ matrix_hostname | to_json }};
   hermesHostName = {{ hermes_hostname | to_json }};
   seafileHostName = {{ seafile_hostname | to_json }};
+  davHostName = {{ dav_hostname | to_json }};
   # Each origin's stable dmz ULA (inventory), plain HTTP on port 80.
   matrixUpstream = {{ hostvars['matrix'].ansible_host | to_json }};
   hermesUpstream = {{ hostvars['hermes-gateway'].ansible_host | to_json }};
   seafileUpstream = {{ hostvars['seafile'].ansible_host | to_json }};
+  davUpstream = {{ hostvars['dav'].ansible_host | to_json }};
   # The web UI is published on the edge's own dmz ULA only (LAN-reachable, not public).
   uiBindAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
   # go2rtc's WebRTC media port on Frigate's dmz NIC, relayed by the edge (nginx stream).

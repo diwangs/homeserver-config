@@ -50,4 +50,4 @@ For now, DHCP is the database.
   as `64:ff9b::<their IPv4>`). The edge terminates TLS with a
   wildcard certificate (DNS-01) and proxies to each origin's dmz ULA.
 - Frigate's WebRTC media (TCP 8555) takes the same path; the edge relays it to go2rtc at L4.
-- Exceptions reached directly, IPv6 only: Home Assistant (backend) and Nextcloud AIO (own TLS).
+- Exception reached directly, IPv6 only: Home Assistant (backend). Nextcloud (CT103) is shut down and no longer exposed; it is not managed by Ansible.
