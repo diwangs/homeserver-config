@@ -42,5 +42,4 @@ digirig_serial_busid: 1-3.2.1
 # Soundcard: C-Media Electronics
 digirig_soundcard_busid: 1-3.2.2
 
-haos_url: https://github.com/home-assistant/operating-system/releases/download/14.2/haos_ova-14.2.qcow2.xz
 skyconnect_busid: 1-1

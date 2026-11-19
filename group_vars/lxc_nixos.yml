@@ -1,5 +1,5 @@
 ---
-# NixOS guests (matrix, hermes, hermes-gateway, seafile, bunkerweb, dav, iot), unlike every other tenant. Two
+# NixOS guests (matrix, hermes, hermes-gateway, seafile, bunkerweb, dav, iot, hass), unlike every other tenant. Two
 # consequences:
 #
 # 1. Ansible's `auto` interpreter discovery probes fixed paths (/usr/bin/python3

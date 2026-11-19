@@ -117,6 +117,22 @@ let
       MAX_CLIENT_SIZE = "50m";
       LIMIT_REQ_RATE = "30r/s";
     };
+
+    # Home Assistant (CT113), on its backend ULA and HA's own port: the edge reaches it
+    # through the router's dmz -> backend forwarding, and HA trusts X-Forwarded-For from
+    # this guest only (http.trusted_proxies), so its login ban sees the real client.
+    # The frontend and the companion apps live on one websocket (/api/websocket), held
+    # open for hours. A cold frontend load fetches ~100 assets at once, hence the higher
+    # request rate. Bodies: backup uploads in the UI, camera snapshots, app webhooks.
+    ${site.hassHostName} = common // {
+      REVERSE_PROXY_HOST = "http://[${site.hassUpstream}]:8123";
+      REVERSE_PROXY_WS = "yes";
+      ALLOWED_METHODS = "GET|POST|HEAD|PUT|PATCH|DELETE|OPTIONS";
+      MAX_CLIENT_SIZE = "1g";
+      LIMIT_REQ_RATE = "50r/s";
+      REVERSE_PROXY_READ_TIMEOUT = "3600s";
+      REVERSE_PROXY_SEND_TIMEOUT = "3600s";
+    };
   };
 
   # The scheduler is the single configuration source (docker integration without

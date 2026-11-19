@@ -1,0 +1,28 @@
+---
+# Fail fast, before anything is changed in the guest or the image is built.
+- name: Require a pinned Home Assistant image
+  ansible.builtin.assert:
+    that:
+      - hass_version | string is match('^20[0-9]{2}\.[0-9]{1,2}\.[0-9]+$')
+      - hass_image_digest is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      hass_version must be a release tag (YYYY.M.P) and hass_image_digest its sha256
+      manifest digest (roles/tenant/hass/defaults/main.yml).
+    quiet: true
+
+- name: Require the public hostname
+  ansible.builtin.assert:
+    that: hass_hostname is match('^hass\.us\..+')
+    fail_msg: >-
+      hass_hostname (group_vars/all/vars.yml) must sit directly under us.<public_domain>,
+      which is all the edge's wildcard certificate covers; check vault_public_domain.
+    quiet: true
+
+- name: Require valid extra ports
+  ansible.builtin.assert:
+    that:
+      - (hass_extra_tcp_ports + hass_extra_udp_ports) | select('integer') | list | length
+        == (hass_extra_tcp_ports + hass_extra_udp_ports) | length
+      - 8123 not in hass_extra_tcp_ports
+    fail_msg: hass_extra_tcp_ports / hass_extra_udp_ports must be lists of port numbers (8123 is always open).
+    quiet: true

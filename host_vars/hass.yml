@@ -1,0 +1,37 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc. Replaces the
+# HAOS VM (VM 200); playbooks/migrate_hass.yml moves its state in (roles/tenant/hass/README.md).
+proxmox_lxc:
+  vmid: 113
+  hostname: hass
+  # Not a pveam Debian image: a NixOS tarball built from roles/tenant/hass/files/nixos by
+  # roles/tenant/hass/tasks/build_template.yml, which runs right before the create task.
+  template: nixos
+  template_role: hass
+  # ostype=nixos stops Proxmox applying its Debian-style guest fixups.
+  ostype: nixos
+  nixos_path_shim: true
+  # Nix store + the Home Assistant image (~2 GB) + /config, whose recorder database is the
+  # bulk. On the SSD (local-lvm) like the VM disk was: the recorder writes constantly,
+  # which would keep the RAID-Z disks from spinning down. Grow with `pct resize 113 rootfs +NG`.
+  disk: local-lvm:32
+  cores: 2
+  # HA Core idles around 1 GB with this many integrations; the rest is headroom for
+  # nixos-rebuild evaluation and the recorder's purge/repack.
+  memory: 4096
+  swap: 1024
+  netif:
+    # backend (VLAN 3), like the VM: the MQTT broker and Thread border router (iot), Frigate,
+    # and the Thread/Matter backbone. Dual-stack, as the VM was (backend keeps IPv4).
+    # The public edge reaches it over the router's dmz -> backend forwarding, so there is
+    # no dmz NIC. ip=manual/ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix (which also pins the DHCPv6 DUID/IAID the router's
+    # reservation matches). hwaddr is pinned so the IPv4 lease (matched on mac) stays
+    # valid if the container is ever recreated. It is NOT the VM's MAC: both exist on
+    # VLAN 3 until the VM is destroyed.
+    net3: "name=eth3,bridge=vmbr1,tag=3,firewall=1,ip=manual,ip6=manual,hwaddr=BC:24:11:4A:55:71"
+  unprivileged: true
+  features:
+    - nesting=1 # Required to run docker, and by the Nix daemon's build sandbox
+  # No mounts: /config stays on the rootfs (see disk above).
+  # No networkd_interfaces: eth3 addressing ships inside the NixOS image.

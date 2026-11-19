@@ -1,0 +1,19 @@
+---
+# Keep in step with stateDir / configDir / migratedMarker in files/nixos/configuration.nix
+# (tests/ checks them).
+hass_state_dir: /var/lib/hass
+hass_config_dir: /var/lib/hass/config
+# Written by playbooks/migrate_hass.yml once the HAOS /config has been copied in. Until
+# then the container stays stopped: an empty /config would start onboarding and let
+# whoever reaches it first create the owner account.
+hass_migrated_marker: /var/lib/hass/migrated
+
+hass_image: "ghcr.io/home-assistant/home-assistant:{{ hass_version }}@{{ hass_image_digest }}"
+
+# The whole home ULA range: direct LAN access to 8123 (and hass_extra_*_ports) without
+# the edge. Same range as iot_lan_prefix.
+hass_lan_prefix: fd5a:715f:1edc:a700::/56
+# IPv4 home LANs (the backend and iot VLANs are dual-stack, and the VM answered on IPv4):
+# devices and clients there may still reach 8123 directly. The router decides which
+# zones get that far.
+hass_lan_prefix4: 192.168.0.0/16

@@ -29,10 +29,12 @@ SITE = """{
   hermesHostName = "hermes.us.example.org";
   seafileHostName = "seafile.us.example.org";
   davHostName = "dav.us.example.org";
+  hassHostName = "hass.us.example.org";
   matrixUpstream = "fd5a:715f:1edc:a706::27";
   hermesUpstream = "fd5a:715f:1edc:a706::29";
   seafileUpstream = "fd5a:715f:1edc:a706::2a";
   davUpstream = "fd5a:715f:1edc:a706::2c";
+  hassUpstream = "fd5a:715f:1edc:a703::24";
   uiBindAddress = "fd5a:715f:1edc:a706::2b";
   frigateWebrtcUpstream = "fd5a:715f:1edc:a706::22";
 }
@@ -43,6 +45,7 @@ HOSTS = (
     "hermes.us.example.org",
     "seafile.us.example.org",
     "dav.us.example.org",
+    "hass.us.example.org",
 )
 
 
@@ -155,6 +158,7 @@ class NixosConfig(unittest.TestCase):
                 "hermes.us.example.org": "http://[fd5a:715f:1edc:a706::29]",
                 "seafile.us.example.org": "http://[fd5a:715f:1edc:a706::2a]",
                 "dav.us.example.org": "http://[fd5a:715f:1edc:a706::2c]",
+                "hass.us.example.org": "http://[fd5a:715f:1edc:a703::24]:8123",
             },
         )
         for h in HOSTS:
@@ -168,6 +172,8 @@ class NixosConfig(unittest.TestCase):
         self.assertEqual(e["hermes.us.example.org_REVERSE_PROXY_WS"], "yes")
         self.assertIn("PROPFIND", e["dav.us.example.org_ALLOWED_METHODS"].split("|"))
         self.assertIn("MKCALENDAR", e["dav.us.example.org_ALLOWED_METHODS"].split("|"))
+        self.assertEqual(e["hass.us.example.org_REVERSE_PROXY_WS"], "yes")
+        self.assertEqual(e["hass.us.example.org_REVERSE_PROXY_READ_TIMEOUT"], "3600s")
         self.assertEqual(e["seafile.us.example.org_MAX_CLIENT_SIZE"], "0")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_URL_1"], "/seafhttp")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_MODSECURITY_1"], "no")

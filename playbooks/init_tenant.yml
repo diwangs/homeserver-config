@@ -12,8 +12,8 @@
 # breaks internet egress under a rotating prefix; DHCPv4 would need an insecure
 # nat64 to the backend subnet. See git history for the full rationale.)
 #
-# nas and hass have no in-tenant provisioning step; the NixOS guests carry theirs in
-# their image.
+# nas has no in-tenant provisioning step; the NixOS guests (hass among them) carry
+# theirs in their image.
 
 - name: Provision Omada tenant
   hosts: omada

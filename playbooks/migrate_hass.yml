@@ -1,0 +1,327 @@
+---
+# One-time cutover of Home Assistant from the HAOS VM (VM 200) into CT113 (hass, Container
+# mode). roles/tenant/hass/README.md, "Migration", is the runbook; this playbook is its
+# cutover step:
+#
+#   ansible-playbook playbooks/migrate_hass.yml
+#
+# Runs entirely on sentinel-lp. It controls HAOS through the QEMU guest agent and the
+# `ha` CLI (roles/tenant/iot/files/haos_exec.py), reads the data from the stopped VM's
+# disk, and reaches CT113 with pct:
+#   1. preflight: Core version == hass_version, no add-on running that Container mode would
+#      lose (hass_haos_dropped_addons), and a dry run of the http:/external_url rewrite
+#      against the live configuration
+#   2. freeze: `ha core stop` (the recorder flushes and closes its database), then a clean
+#      VM shutdown, and onboot off so a host reboot cannot bring the old instance back
+#   3. copy /mnt/data/supervisor/homeassistant (users, auth tokens, .storage, recorder DB)
+#      from the VM's data partition, mapped read-only on the host, into CT113. The guest
+#      agent cannot carry it: qemu-ga caps exec output at ~16 MB
+#   4. rewrite http: (drop the TLS add-on's settings, trust the edge's X-Forwarded-For) and
+#      external_url (https://hass_hostname), then check_config in the pinned image
+#   5. write the marker and start the container
+# The VM disk is never written, so rollback is: stop docker-homeassistant in CT113, revert
+# host_vars/prydwen.yml's hass leases if already applied, `qm set 200 --onboot 1 && qm start 200`.
+# Refuses to run twice unless -e hass_force=true (which moves CT113's /config aside first).
+#
+# Rehearsal: -e hass_rehearse=true runs only the preflight (HAOS keeps running, CT113 need
+# not exist) and prints what the cutover would change.
+
+- name: Move Home Assistant from HAOS into CT113
+  hosts: sentinel-lp
+  gather_facts: false
+  vars:
+    hass_force: false
+    hass_rehearse: false
+    hass_ct: "{{ hostvars['hass'].proxmox_lxc.vmid }}"
+    hass_haos_vmid: 200 # the HAOS VM, created by the old roles/tenant/hass
+    # HAOS add-ons whose job Container mode drops by decision: the TLS front (BunkerWeb
+    # terminates TLS now) and the file editor (`pct enter` instead). Any other add-on that
+    # is started fails the preflight, so nothing is lost silently. Check the slugs against
+    # the rehearsal's list.
+    hass_haos_dropped_addons: [core_letsencrypt, core_nginx_proxy, core_configurator, a0d7b954_filebrowser]
+    hass_stage: /root/hass-migration
+    hass_helper: "{{ hass_stage }}/haos_exec.py"
+    hass_haos_config: /mnt/data/supervisor/homeassistant
+    hass_edge_address: "{{ hostvars['bunkerweb'].ansible_host }}"
+    hass_external_url: "https://{{ hass_hostname }}"
+    hass_rewrite_args: >-
+      {{ hass_edge_address | quote }} {{ hass_external_url | quote }} {{ hass_legacy_hostname | quote }}
+    # In-CT tools (NixOS keeps them in the system profile).
+    hass_ct_bin: /run/current-system/sw/bin
+  tasks:
+    # Brings the role's defaults/vars (pins, paths) into scope.
+    - name: Validate Home Assistant inputs
+      ansible.builtin.import_role:
+        name: hass
+        tasks_from: validate.yml
+
+    # ── Preconditions (nothing changed yet) ─────────────────────────────────
+    - name: Check for an earlier migration
+      ansible.builtin.command: pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/test -e {{ hass_migrated_marker }}
+      register: hass_marker
+      changed_when: false
+      failed_when: hass_marker.rc not in [0, 1]
+      when: not (hass_rehearse | bool)
+
+    - name: Refuse to migrate twice
+      ansible.builtin.assert:
+        that: hass_marker.rc != 0 or (hass_force | bool)
+        fail_msg: >-
+          {{ hass_migrated_marker }} exists: CT113 already runs the migrated Home Assistant (and
+          has history HAOS lacks). Re-run with -e hass_force=true only if you mean to replace it.
+        quiet: true
+      when: not (hass_rehearse | bool)
+
+    - name: Require the HAOS guest agent
+      ansible.builtin.command: qm agent {{ hass_haos_vmid }} ping
+      changed_when: false
+
+    - name: Create the root-only staging directory
+      ansible.builtin.file:
+        path: "{{ hass_stage }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Install the guest-agent helper
+      ansible.builtin.copy:
+        src: ../roles/tenant/iot/files/haos_exec.py
+        dest: "{{ hass_helper }}"
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Migrate
+      block:
+        # ── 1. Preflight ────────────────────────────────────────────────────
+        - name: Read the Core version and the add-ons from the Supervisor
+          ansible.builtin.command:
+            cmd: python3 {{ hass_helper }} {{ hass_haos_vmid }}
+            stdin: |
+              set -e
+              # The CLI prints no trailing newline; one document per line.
+              docker exec hassio_cli ha core info --raw-json; echo
+              docker exec hassio_cli ha addons --raw-json; echo
+          register: hass_sup
+          changed_when: false
+
+        - name: Parse the Supervisor's answers
+          ansible.builtin.set_fact:
+            hass_haos_version: "{{ (hass_sup.stdout_lines[0] | from_json).data.version }}"
+            hass_haos_addons: "{{ (hass_sup.stdout_lines[1] | from_json).data.addons }}"
+
+        - name: Require the pinned Core version
+          ansible.builtin.assert:
+            that: hass_haos_version == hass_version | string
+            fail_msg: >-
+              HAOS runs Core {{ hass_haos_version }} but hass_version is {{ hass_version }}
+              (roles/tenant/hass/defaults/main.yml). Update one of them (with the matching
+              hass_image_digest) so the container opens /config with the same Core that wrote it.
+            quiet: true
+
+        - name: Require that no needed add-on is running
+          ansible.builtin.assert:
+            that: >-
+              hass_haos_addons | selectattr('state', 'eq', 'started') | map(attribute='slug')
+              | difference(hass_haos_dropped_addons) | length == 0
+            fail_msg: >-
+              These add-ons are running and have no replacement in Container mode:
+              {{ hass_haos_addons | selectattr('state', 'eq', 'started') | map(attribute='slug')
+                 | difference(hass_haos_dropped_addons) | join(', ') }}. Port them to a container
+              (as roles/tenant/iot did) or stop them, or add them to hass_haos_dropped_addons.
+            quiet: true
+
+        - name: Inspect the live configuration
+          ansible.builtin.command:
+            cmd: python3 {{ hass_helper }} {{ hass_haos_vmid }}
+            stdin: |
+              du -sh {{ hass_haos_config }} | cut -f1
+              docker exec homeassistant netstat -ltnup 2>/dev/null | awk 'NR>2 {print $1, $4, $NF}' | sort -u
+          register: hass_live
+          changed_when: false
+
+        # The rewrite helper is standard-library Python; HAOS's host has no Python, its
+        # homeassistant container does.
+        - name: Dry-run the http/external_url rewrite on the live configuration
+          ansible.builtin.command:
+            cmd: python3 {{ hass_helper }} {{ hass_haos_vmid }}
+            stdin: |
+              docker exec -i homeassistant python3 - --dry-run /config {{ hass_rewrite_args }} <<'HASS_REWRITE_EOF'
+              {{ lookup('ansible.builtin.file', '../roles/tenant/hass/files/rewrite_http.py') }}
+              HASS_REWRITE_EOF
+          register: hass_dry
+          changed_when: false
+          failed_when: hass_dry.rc != 0 or 'refused' in (hass_dry.stdout | from_json)
+
+        - name: Report the preflight
+          ansible.builtin.debug:
+            msg:
+              - "Core {{ hass_haos_version }}; /config is {{ hass_live.stdout_lines[0] }}"
+              - "Add-ons: {{ hass_haos_addons | map(attribute='slug') | zip(hass_haos_addons | map(attribute='state')) | map('join', '=') | join(', ') }}"
+              - Listeners in HAOS (8123 is opened; add what integrations need to hass_extra_tcp_ports / hass_extra_udp_ports)
+              - "{{ hass_live.stdout_lines[1:] }}"
+              - "http: before"
+              - "{{ (hass_dry.stdout | from_json).old_http_block | default('(none)') }}"
+              - "http: after"
+              - "{{ (hass_dry.stdout | from_json).new_http_block }}"
+              - ".storage/http (what HA really uses): {{ (hass_dry.stdout | from_json).http_store }}"
+              - "external_url {{ (hass_dry.stdout | from_json).old_external_url }} -> {{ hass_external_url }}"
+              - "internal_url {{ (hass_dry.stdout | from_json).old_internal_url }} -> {{ (hass_dry.stdout | from_json).internal_url }}"
+
+        - name: End the rehearsal
+          ansible.builtin.debug:
+            msg: Rehearsal passed. HAOS and CT113 were not touched.
+          when: hass_rehearse | bool
+
+        - name: Cut over
+          when: not (hass_rehearse | bool)
+          block:
+            - name: Require CT113 to be running
+              ansible.builtin.command: pct status {{ hass_ct }}
+              register: hass_ct_status
+              changed_when: false
+              failed_when: "'running' not in hass_ct_status.stdout"
+
+            - name: Read the HAOS VM config
+              ansible.builtin.command: qm config {{ hass_haos_vmid }}
+              register: hass_qm
+              changed_when: false
+
+            - name: Resolve the HAOS system disk
+              ansible.builtin.command: >-
+                pvesm path {{ hass_qm.stdout | regex_search('(?m)^scsi0: ([^,]+)', '\1') | first }}
+              register: hass_disk
+              changed_when: false
+
+            # ── 2. Freeze HAOS ──────────────────────────────────────────────
+            - name: Stop Home Assistant Core in HAOS
+              ansible.builtin.command:
+                cmd: python3 {{ hass_helper }} {{ hass_haos_vmid }}
+                stdin: docker exec hassio_cli ha core stop
+              changed_when: true
+
+            # With the guest agent, qm shutdown asks HAOS to power off cleanly.
+            - name: Shut the HAOS VM down
+              ansible.builtin.command: qm shutdown {{ hass_haos_vmid }} --timeout 300
+              changed_when: true
+
+            - name: Keep the HAOS VM from starting on boot
+              ansible.builtin.command: qm set {{ hass_haos_vmid }} --onboot 0
+              changed_when: true
+
+            # ── 3. Copy /config ─────────────────────────────────────────────
+            - name: Move an earlier /config aside
+              ansible.builtin.command: >-
+                pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/sh -euc
+                'PATH={{ hass_ct_bin }}; systemctl stop docker-homeassistant.service; rm -f {{ hass_migrated_marker }};
+                mv {{ hass_config_dir }} {{ hass_config_dir }}.$(date +%Y%m%d%H%M%S);
+                install -d -m 0700 {{ hass_config_dir }}'
+              when: hass_marker.rc == 0
+              changed_when: true
+
+            - name: Require an empty /config in CT113
+              ansible.builtin.command: >-
+                pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/find {{ hass_config_dir }} -mindepth 1 -print -quit
+              register: hass_dest
+              changed_when: false
+              failed_when: hass_dest.rc != 0 or hass_dest.stdout | length > 0
+
+            # Read-only all the way: the LV through a read-only loop device, ext4 with
+            # noload (no journal replay; the shutdown was clean). Numeric owners are kept,
+            # so root in HAOS stays root in the CT.
+            - name: Copy /config from the HAOS data partition into CT113
+              ansible.builtin.shell:
+                cmd: |
+                  set -euo pipefail
+                  disk={{ hass_disk.stdout | quote }}
+                  mnt={{ hass_stage }}/haos-data
+                  lvchange -ay "$disk"
+                  loop=$(losetup -f --show -P -r "$disk")
+                  trap 'umount "$mnt" 2>/dev/null || true; losetup -d "$loop"' EXIT
+                  udevadm settle
+                  part=$(lsblk -lnpo NAME,LABEL "$loop" | awk '$2 == "hassos-data" {print $1}')
+                  [ -n "$part" ] || { echo "no hassos-data partition on $disk" >&2; exit 1; }
+                  mkdir -p "$mnt"
+                  mount -o ro,noload "$part" "$mnt"
+                  src="$mnt/supervisor/homeassistant"
+                  [ -s "$src/.storage/auth" ] || { echo "$src has no .storage/auth" >&2; exit 1; }
+                  tar -C "$src" --numeric-owner -cf - . \
+                    | pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/tar --numeric-owner -xpf - -C {{ hass_config_dir }}
+                executable: /bin/bash
+              changed_when: true
+
+            # ── 4. Point it at the edge ─────────────────────────────────────
+            # pct push reads its source on this host, so stage the helper here first.
+            - name: Stage the rewrite helper on the Proxmox host
+              ansible.builtin.copy:
+                src: ../roles/tenant/hass/files/rewrite_http.py
+                dest: "{{ hass_stage }}/rewrite_http.py"
+                owner: root
+                group: root
+                mode: "0700"
+
+            - name: Install the rewrite helper in CT113
+              ansible.builtin.command: >-
+                pct push {{ hass_ct }} {{ hass_stage }}/rewrite_http.py
+                {{ hass_state_dir }}/rewrite_http.py --perms 0700
+              changed_when: true
+
+            - name: Rewrite http and external_url
+              ansible.builtin.command: >-
+                pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/python3 {{ hass_state_dir }}/rewrite_http.py
+                {{ hass_config_dir }} {{ hass_rewrite_args }}
+              register: hass_rewrite
+              changed_when: true
+
+            - name: Check the configuration with the pinned image
+              ansible.builtin.command: >-
+                pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/docker run --rm --network=none
+                -v {{ hass_config_dir }}:/config --entrypoint python3 {{ hass_image }}
+                -m homeassistant --script check_config --config /config
+              register: hass_check
+              changed_when: false
+              # The first run pulls the image (~2 GB).
+              timeout: 1800
+
+            # ── 5. Start ────────────────────────────────────────────────────
+            - name: Mark the state as migrated
+              ansible.builtin.command:
+                argv:
+                  - pct
+                  - exec
+                  - "{{ hass_ct }}"
+                  - --
+                  - "{{ hass_ct_bin }}/sh"
+                  - -c
+                  - "echo 'migrated from HAOS VM {{ hass_haos_vmid }} (core {{ hass_haos_version }})' > {{ hass_migrated_marker }}"
+              changed_when: true
+
+            - name: Start Home Assistant
+              ansible.builtin.command: pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/systemctl start docker-homeassistant.service
+              changed_when: true
+
+            # 401 is the API refusing an anonymous request: HA is up and has its users.
+            - name: Wait for the API
+              ansible.builtin.command: >-
+                pct exec {{ hass_ct }} -- {{ hass_ct_bin }}/curl -s -o /dev/null -w '%{http_code}' http://[::1]:8123/api/
+              register: hass_api
+              until: hass_api.stdout == '401'
+              retries: 60
+              delay: 10
+              changed_when: false
+              failed_when: false
+
+            - name: Report the cutover
+              ansible.builtin.debug:
+                msg:
+                  - "API answered {{ hass_api.stdout }} (expected 401; otherwise see `docker logs homeassistant` in CT113)"
+                  - "http keys dropped: {{ (hass_rewrite.stdout | from_json).dropped_http_keys }}"
+                  - "{{ hass_check.stdout_lines | select('search', '(?i)error|invalid') | list or ['check_config: no errors'] }}"
+                  - Next, apply the leases (configure.yml --limit prydwen) and `pct reboot {{ hass_ct }}`; see the README.
+
+      always:
+        - name: Remove the staging directory
+          ansible.builtin.file:
+            path: "{{ hass_stage }}"
+            state: absent

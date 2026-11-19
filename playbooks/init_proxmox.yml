@@ -1,6 +1,6 @@
 ---
 # Provisioning, stage 1 of 2 — runs on the Proxmox host. Creates the
-# containers/VM and lays down their immutable per-guest platform that lives on the
+# containers and lays down their immutable per-guest platform that lives on the
 # host side (resources at creation, UID passthrough, bind mounts, bootstrap
 # networking). Works on a cold host: guests are reached with `pct exec`, not over
 # the network (hermes-gateway's NixOS template is built inside hermes, CT107).
@@ -36,8 +36,4 @@
     - name: Create LXC guests
       ansible.builtin.import_role:
         name: proxmox_lxc
-        tasks_from: create.yml
-    - name: Set up Home Assistant VM
-      ansible.builtin.import_role:
-        name: hass
         tasks_from: create.yml

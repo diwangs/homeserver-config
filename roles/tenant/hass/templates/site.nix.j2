@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Public identity, allowed client ranges and the pinned image for configuration.nix. The
+# hostname comes from the vault (group_vars/all/vars.yml) so it never sits in the committed
+# flake tree. JSON string literals are valid Nix strings, hence to_json.
+# NO secrets belong here: this file is copied into /nix/store (world-readable) and
+# baked into the image. HA's own credentials stay in /config/.storage.
+{
+  hostName = {{ hass_hostname | to_json }};
+  # The public edge (roles/tenant/bunkerweb), reaching 8123 over dmz -> backend forwarding.
+  edgeAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
+  # Direct LAN access (no edge) from the home ULA range.
+  lanPrefix = {{ hass_lan_prefix | to_json }};
+  lanPrefix4 = {{ hass_lan_prefix4 | to_json }};
+  image = {{ hass_image | to_json }};
+  extraTcpPorts = {{ hass_extra_tcp_ports | to_json }};
+  extraUdpPorts = {{ hass_extra_udp_ports | to_json }};
+}

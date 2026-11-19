@@ -67,7 +67,7 @@ Frigate reads its broker login from here too (`roles/tenant/frigate/vars/main.ym
 ## Migration
 
 `playbooks/migrate_iot.yml` does the whole cutover from sentinel-lp: it reaches HAOS through the
-QEMU guest agent (`hass_agent`, `roles/tenant/hass`) and the Supervisor API, and CT112 with `pct`.
+QEMU guest agent of the HAOS VM (VM 200, since replaced by CT113 — `roles/tenant/hass`) and the Supervisor API, and CT112 with `pct`.
 No HA backup or manual HAOS step is involved.
 
 1. **Prepare** (no downtime):

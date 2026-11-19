@@ -12,17 +12,18 @@ bad-behavior bans) on LXC 110 in the dmz, the TLS-terminating edge for:
 | `hermes.us.example.org` | hermes-gateway (CT108) `fd5a:715f:1edc:a706::29` — nginx → CT107 dashboard |
 | `seafile.us.example.org` | seafile (CT109) `fd5a:715f:1edc:a706::2a` — Seafile's own nginx |
 | `dav.us.example.org` | dav (CT111) `fd5a:715f:1edc:a706::2c` — Radicale, CalDAV/CardDAV, via a host nginx stream relay |
+| `hass.us.example.org` | hass (CT113) `[fd5a:715f:1edc:a703::24]:8123` — Home Assistant itself. The exception: its **backend** ULA and port 8123, over the router's dmz → backend forwarding (see `roles/tenant/hass/README.md`) |
 
 It also relays **Frigate's WebRTC media** (`frigate-webrtc.us.example.org:8555`, TCP only) at L4
 with an nginx stream server to go2rtc on Frigate's dmz ULA (`bunkerweb_frigate_webrtc_upstream`,
 `fd5a:715f:1edc:a706::22`). BunkerWeb itself is not involved (it is not HTTP).
 
-**Not behind the edge, by decision:** `hass-us.example.org` (KVM on backend, `Allow-Hass`), IPv6-only.
-Nextcloud used to be the other exception; it is shut down and no longer exposed.
+Every public HTTP(S) service is behind the edge. Home Assistant used to be reached directly as
+`hass-us.example.org` (own TLS, `Allow-Hass`) and Nextcloud likewise; both exceptions are gone.
 
 ## How traffic arrives
 
-- **DNS**: `matrix.us`, `hermes.us`, `seafile.us`, `dav.us` and `frigate-webrtc.us` are **CNAMEs** to
+- **DNS**: `matrix.us`, `hermes.us`, `seafile.us`, `dav.us`, `hass.us` and `frigate-webrtc.us` are **CNAMEs** to
   `edge.us.example.org` (`edge_hostname`), whose records the router's ddns keeps current:
   AAAA from the edge's dmz lease (`ddns.edge`), A from the router's WAN address (`ddns.edge4`).
   Both records must already exist in Cloudflare (ddns updates, it does not create).
@@ -98,11 +99,14 @@ IPv6 and the `DNAT-BunkerWeb-*` forwards (into Jool) for IPv4. Nothing else from
 - **`USE_IPV6=yes`**: BunkerWeb listens on IPv4 only by default; IPv6 clients are handed to the
   container's IPv6 address and would otherwise be reset before TLS.
 - **Origins** are plain HTTP on the dmz ULAs; each origin's firewall admits port 80 from this
-  guest's ULA only (`site.edgeAddress` there).
+  guest's ULA only (`site.edgeAddress` there). Home Assistant: 8123 on its backend ULA, admitted
+  from this guest and the home LANs; HA trusts `X-Forwarded-For` from this guest only.
 - **Per-site tuning**: Matrix and Seafile need `PUT`/`DELETE`/`OPTIONS`; Matrix allows 20 MB
   bodies and long `/sync` polls; Hermes needs websockets and hour-long reads; Seafile has no body
   limit, `/seafhttp` (file transfer) is streamed unbuffered with ModSecurity off, and
-  `X-Forwarded-Protocol` is dropped (seahub's gunicorn rejects it next to `X-Forwarded-Proto`).
+  `X-Forwarded-Protocol` is dropped (seahub's gunicorn rejects it next to `X-Forwarded-Proto`);
+  Home Assistant needs websockets held for hours, up to 1 GB bodies (backup uploads) and 50 r/s
+  (a cold frontend load).
 - **ModSecurity** runs in `DetectionOnly` (`bunkerweb_modsecurity_engine` in `defaults/main.yml`).
   Watch `docker logs bunkerweb` for CRS hits from normal Matrix/Seafile/Hermes use, add
   exclusions if needed, then set it to `On`.
@@ -111,11 +115,10 @@ IPv6 and the `DNAT-BunkerWeb-*` forwards (into Jool) for IPv4. Nothing else from
 
 ## Trade-offs accepted
 
-- **The home addresses are public**: `edge.us` publishes the router's IPv4 and the edge's GUA, and
-  the hass record publishes the `/56`. A volumetric flood would saturate the home line
+- **The home addresses are public**: `edge.us` publishes the router's IPv4 and the edge's GUA
+  (and so the `/56`). A volumetric flood would saturate the home line
   (the ISP is the only mitigation); the realistic risks are application-level, which the WAF
   covers once ModSecurity is switched from `DetectionOnly` to `On`.
-- **Home Assistant is IPv6-only** for now; IPv4-only clients cannot reach them.
 - **Remote WebRTC is TCP-only**, so it stalls more than UDP on lossy mobile networks. LAN clients
   still use UDP on the dmz ULA.
 
@@ -158,7 +161,7 @@ Verify (from outside the house, ideally a phone off Wi-Fi):
 - `docker logs bunkerweb` shows real client addresses on both families.
 - federationtester passes, a Seafile client syncs a large file, the Hermes dashboard and its
   websocket work, and remote camera viewing in the HA app connects (TCP).
-- From outside, the origins' GUAs refuse 80/443; hass still answers.
+- From outside, the origins' GUAs refuse 80/443, and so does Home Assistant's (`Allow-Hass` is gone).
 
 ## Upgrading
 

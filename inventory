@@ -25,6 +25,8 @@ seafile ansible_host=fd5a:715f:1edc:a706::2a
 bunkerweb ansible_host=fd5a:715f:1edc:a706::2b
 dav ansible_host=fd5a:715f:1edc:a706::2c
 iot ansible_host=fd5a:715f:1edc:a703::2d
+# Home Assistant keeps the address (hostid 24) the HAOS VM had, so iot and Frigate need no change.
+hass ansible_host=fd5a:715f:1edc:a703::24
 
 # Debian tenants running Docker (roles/common/docker_host); per-host network params in host_vars.
 [lxc_docker]
@@ -40,3 +42,4 @@ seafile
 bunkerweb
 dav
 iot
+hass

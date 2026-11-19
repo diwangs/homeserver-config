@@ -41,6 +41,7 @@
       - hermes_hostname is match('^hermes\.us\..+')
       - seafile_hostname is match('^seafile\.us\..+')
       - dav_hostname is match('^dav\.us\..+')
+      - hass_hostname is match('^hass\.us\..+')
       - acme_email | length > 0
     fail_msg: >-
       The *.us hostnames (group_vars/all/vars.yml) must sit directly under

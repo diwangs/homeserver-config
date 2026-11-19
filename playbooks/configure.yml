@@ -26,10 +26,6 @@
       ansible.builtin.import_role:
         name: proxmox_lxc
         tasks_from: reconcile.yml
-    - name: Reconcile Home Assistant resources
-      ansible.builtin.import_role:
-        name: hass
-        tasks_from: reconcile.yml
 
 - name: Configure NAS tenant
   hosts: nas
@@ -88,7 +84,14 @@
   roles:
     - role: iot
 
-# The public HTTP(S) edge for matrix, hermes, seafile and dav. After the origins, so a first
+# Home Assistant (Container mode). Stays stopped until playbooks/migrate_hass.yml has copied
+# the HAOS state in.
+- name: Configure Home Assistant tenant
+  hosts: hass
+  roles:
+    - role: hass
+
+# The public HTTP(S) edge for matrix, hermes, seafile, dav and hass. After the origins, so a first
 # run finds them already serving plain HTTP on :80.
 - name: Configure BunkerWeb tenant
   hosts: bunkerweb

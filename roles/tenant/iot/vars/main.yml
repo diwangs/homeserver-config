@@ -30,7 +30,7 @@ iot_z2m_frontend_token: "{{ vault_iot_z2m_frontend_token | default('') }}"
 iot_radio_device: "{{ hostvars['iot'].iot_radio_by_id }}"
 iot_multipan_image: "homeassistant/amd64-addon-silabs-multiprotocol:{{ iot_multipan_version }}@{{ iot_multipan_digest }}"
 
-# Home Assistant (VM 200) on the backend: lease host_hass_v6 (hostid 24) in
+# Home Assistant (CT113, the address the HAOS VM had) on the backend: lease host_hass_v6 (hostid 24) in
 # host_vars/prydwen.yml. The only client admitted to the OTBR REST API.
 iot_hass_address: fd5a:715f:1edc:a703::24
 # Backend VLAN 3 (MQTT clients: HA, Frigate) and the whole home ULA range (Z2M frontend).

@@ -1,32 +1,20 @@
 ---
-# Home Assistant VM (KVM, not LXC — hence its own role rather than proxmox_lxc).
-# This tenant role runs on the Proxmox host; HAOS manages the guest itself.
-# Creation parameters, applied once by tasks/create.yml and never reconciled:
-hass_vmid: 200
-hass_name: hass
-hass_machine: q35
-hass_ostype: l26
-hass_bios: ovmf
-hass_efidisk0:
-  storage: local-lvm
-  efitype: 4m
-  format: raw
-  pre_enrolled_keys: false
-hass_sockets: 1
-hass_net:
-  # Backend VLAN, because we need to connect to IoT and stuffs
-  net0: virtio,bridge=vmbr1,tag=3,firewall=1
-hass_scsihw: virtio-scsi-single
-# Creation-time only (create.yml); never reconciled. The SkyConnect moved to the iot CT
-# (CT112, host_vars/iot.yml, iot_radio_by_id) with the Zigbee/Thread stack; detach it from a live VM with
-# `qm set 200 --delete usb0` (roles/tenant/iot/README.md, "Migration").
-hass_usb: {}
+# Pinned Home Assistant Core release (ghcr.io/home-assistant/home-assistant), tag and
+# manifest-list digest together: never `latest` or `stable`. On the cutover it must equal
+# the Core version HAOS runs (playbooks/migrate_hass.yml checks it), because a newer Core
+# would migrate /config on first start and an older one may not read it.
+# Upgrade procedure: read the release notes (breaking changes), take a backup (Settings ->
+# System -> Backups), bump both values, rerun playbooks/configure.yml --limit hass.
+# Digest: `skopeo inspect --raw docker://ghcr.io/home-assistant/home-assistant:<tag> | sha256sum`,
+# or the Docker-Content-Digest header of the registry's manifest response.
+hass_version: 2026.11.2
+hass_image_digest: sha256:493a07e8f6530fc640223f4a0a5248f20a61ca2f718bb1d31efbf08a2c5ea28f
 
-# Mutable resources. Read at creation and reconciled onto the live VM by
-# tasks/reconcile.yml (proxmox_kvm update: true). No swap: this is a VM.
-hass_cores: 2
-# QEMU guest agent (HAOS ships qemu-ga): lets the Proxmox host run commands in the guest
-# with `qm guest exec 200` and shut it down cleanly. A change takes effect on the next full
-# VM stop/start, not on a reboot from inside the guest.
-hass_agent: "enabled=1"
-hass_memory: 6144
+# Extra TCP/UDP ports Home Assistant itself listens on for clients on the home ULA range,
+# beyond 8123 (e.g. HomeKit Bridge 21063-21070, emulated_hue 80/8300). The migration
+# rehearsal lists what HAOS listens on; add what an integration needs.
+# From the migration rehearsal (what HAOS's Core listened on):
+#  - 18555/tcp: Core's built-in go2rtc, WebRTC media for camera streams in the frontend
+#  - 1900/udp: SSDP, where devices announce themselves (NOTIFY) for discovery
+hass_extra_tcp_ports: [18555]
+hass_extra_udp_ports: [1900]

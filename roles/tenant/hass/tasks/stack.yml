@@ -1,0 +1,21 @@
+---
+# The container may only start once playbooks/migrate_hass.yml has put the HAOS /config in
+# place (its unit carries the same condition, so a reboot of a fresh guest stays quiet).
+- name: Check whether the HAOS state has been migrated
+  ansible.builtin.stat:
+    path: "{{ hass_migrated_marker }}"
+  register: hass_migrated
+
+- name: Report that Home Assistant is waiting for the migration
+  ansible.builtin.debug:
+    msg: >-
+      {{ hass_migrated_marker }} is missing: Home Assistant stays stopped until
+      playbooks/migrate_hass.yml has copied the HAOS state (roles/tenant/hass/README.md).
+  when: not hass_migrated.stat.exists
+
+# nixos-rebuild restarts the unit itself when its definition (e.g. the image pin) changed.
+- name: Start Home Assistant
+  ansible.builtin.systemd_service:
+    name: docker-homeassistant.service
+    state: started
+  when: hass_migrated.stat.exists

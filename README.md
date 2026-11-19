@@ -36,13 +36,14 @@ group_vars/, host_vars/  per-group / per-host data; each guest's LXC definition 
                          `proxmox_lxc` in host_vars/<guest>.yml
 site.yml                 imports the three stages below (tags: init_proxmox, init_tenant, configure)
 playbooks/
-  init_proxmox.yml       stage 1: host setup + create guests (host/proxmox_lxc, tenant/hass)
+  init_proxmox.yml       stage 1: host setup + create guests (host/proxmox_lxc)
   init_tenant.yml        stage 2: immutable in-guest platform (docker_host, apt repos)
   configure.yml          reconcile resources/mounts + deploy apps; safe to re-run any time
   init_openwrt.yml       first-run provisioning of the prydwen router
   upgrade_lxc_dist.yml   in-place Debian major upgrade of one tenant
   migrate_hermes.yml     one-off: split the Matrix gateway out of hermes into CT108
   migrate_iot.yml        one-off: move the Zigbee/Thread state from the HAOS add-ons into CT112
+  migrate_hass.yml       one-off: move Home Assistant from the HAOS VM into CT113 (Container mode)
 roles/
   host/                 physical host, router, and guest provisioning
     proxmox_lxc, proxmox_templates, zfs, hd_idle, clat, prydwen,
@@ -50,8 +51,9 @@ roles/
   common/               shared in-guest building blocks
     docker_host, portainer, cifs_mount, journald, disable_ssh
   tenant/               one role per tenant service
-    hass, nas, omada, frigate, seedbox, immich, matrix, hermes, hermes_gateway,
+    nas, omada, frigate, seedbox, immich, matrix, hermes, hermes_gateway,
     seafile, dav (Radicale), bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md),
+    hass (Home Assistant Container; see roles/tenant/hass/README.md),
     iot (Zigbee multiprotocol radio, Thread border router, Mosquitto, Zigbee2MQTT)
   maintenance/
     debian_dist_upgrade used by playbooks/upgrade_lxc_dist.yml
@@ -62,10 +64,10 @@ short role names such as `proxmox_lxc` and `frigate`.
 The `host` inventory group contains `sentinel-lp` and `prydwen`; platform-specific
 plays target each host directly. Guests belong to `tenant_lxc`, with their
 connection settings in `group_vars/tenant_lxc.yml`.
-Home Assistant is a KVM tenant: `roles/tenant/hass` runs on `sentinel-lp` to
-create its VM and reconcile resources, with no in-guest Ansible tasks. Its Zigbee, Thread
-and MQTT add-ons moved to the `iot` CT (`roles/tenant/iot/README.md`); HA reaches them
-over the backend.
+Home Assistant runs in Container mode in a NixOS LXC (CT113, `roles/tenant/hass`), public
+as `hass.us` behind the BunkerWeb edge. It replaced the HAOS VM (VM 200); its Zigbee, Thread
+and MQTT add-ons had already moved to the `iot` CT (`roles/tenant/iot/README.md`), which HA
+reaches over the backend.
 
 Day to day: `ansible-playbook playbooks/configure.yml` (optionally `--limit <host>`).
 Cold start: `playbooks/init_proxmox.yml` → set the DHCPv6 leases →

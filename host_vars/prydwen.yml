@@ -176,6 +176,16 @@ prydwen_uci_absent_sections:
     type: rule
     find:
       name: Allow-Frigate-WebRTC
+  # Home Assistant is behind the BunkerWeb edge as hass.us (a CNAME to edge.us), so its
+  # direct opening (own TLS on the backend GUA) and the old hass-us ddns record go.
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ hass_legacy_hostname }}"
+  - config: firewall
+    type: rule
+    find:
+      name: Allow-Hass
 
 # Values applied to packaged/generated sections without replacing their defaults.
 prydwen_uci_values:
@@ -645,11 +655,16 @@ prydwen_uci_sections:
     name: host_nextcloud
     find: { name: nextcloud }
     value: { leasetime: 10m, hostid: "23", duid: ["00020000ab110d469aa3877e37f4%7d9e78ea"] }
+  # Home Assistant (CT113). Assigned, not discovered: the image pins this DUID/IAID
+  # (roles/tenant/hass/files/nixos/configuration.nix). Same hostid as the HAOS VM had, so
+  # the iot and Frigate guests keep trusting the same address. Matched on name + hostid
+  # (host_hass_v4 shares the name but has no hostid), so the old VM's entry
+  # (duid 0004e51a…) is updated in place. The MAC lives on host_hass_v4 only.
   - config: dhcp
     type: host
     name: host_hass_v6
-    find: { name: hass, duid: "0004e51a93f40af30c514f366ca4f873ed66" }
-    value: { hostid: "24", leasetime: 10m }
+    find: { name: hass, hostid: "24" }
+    value: { hostid: "24", leasetime: 10m, duid: ["00020000ab11686173736c780071%68617373"] }
   - config: dhcp
     type: host
     name: host_seedbox_v6
@@ -784,7 +799,8 @@ prydwen_uci_sections:
     type: host
     name: host_hass_v4
     find: { name: hass, ip: 192.168.3.24 }
-    value: { mac: ["BC:24:11:FC:D0:6E"], leasetime: 5m }
+    # CT113's pinned hwaddr (host_vars/hass.yml); the HAOS VM was BC:24:11:FC:D0:6E.
+    value: { mac: ["BC:24:11:4A:55:71"], leasetime: 5m }
   - config: dhcp
     type: host
     name: host_seedbox_v4
@@ -962,18 +978,6 @@ prydwen_uci_sections:
       dest_port: "64555"
       target: DNAT
       family: ipv4
-  - config: firewall
-    type: rule
-    name: rule_hass
-    find: { name: Allow-Hass }
-    value:
-      proto: [tcp]
-      src: wan
-      dest: backend
-      dest_port: "80 443"
-      target: ACCEPT
-      family: ipv6
-      dest_ip: ["0:0:0:3::24/-56"]
 
   # DNS-over-HTTPS resolvers.
   - config: https-dns-proxy
@@ -998,30 +1002,6 @@ prydwen_uci_sections:
   # Cloudflare DDNS services. The shared API token is never logged. Hostnames come
   # from group_vars/all/vars.yml (zone in vault); `domain` is cloudflare.com-v4's
   # <host>@<zone> form.
-  - config: ddns
-    type: service
-    name: hass
-    find: { lookup_host: "{{ hass_hostname }}" }
-    secret: true
-    value:
-      service_name: cloudflare.com-v4
-      use_ipv6: "1"
-      enabled: "1"
-      domain: "hass-us@{{ public_domain }}"
-      username: Bearer
-      password: "{{ prydwen_cloudflare_api_token }}"
-      use_https: "1"
-      cacert: /etc/ssl/certs
-      ip_source: script
-      ip_script: >-
-        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_backend_device }}']['leases'][@.hostname='hass']['ipv6-addr'][0]['address']\""
-      interface: wan
-      force_ipversion: "1"
-      use_syslog: "2"
-      check_unit: minutes
-      force_unit: minutes
-      retry_unit: seconds
   # The BunkerWeb edge's public name (edge_hostname); matrix.us, hermes.us, seafile.us and
   # frigate-webrtc.us are CNAMEs to it. AAAA from the edge's dmz lease (pinned, host_bunkerweb),
   # A from the router's own WAN address (the Jool-bound DNATs). Both records must already exist in

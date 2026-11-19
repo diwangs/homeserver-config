@@ -5,7 +5,7 @@
 #   ansible-playbook playbooks/migrate_iot.yml
 #
 # Runs entirely on sentinel-lp. It reaches into HAOS (VM 200) through the QEMU guest agent
-# (hass_agent, roles/tenant/hass) and into CT112 with pct, so no HA backup or manual HAOS
+# (VM 200 had qemu-ga enabled) and into CT112 with pct, so no HA backup or manual HAOS
 # step is involved:
 #   1. freeze HAOS: Zigbee2MQTT, Silicon Labs Multiprotocol and Mosquitto set to
 #      boot=manual and stopped, through the Supervisor API
@@ -29,7 +29,7 @@
     iot_force: false
     iot_rehearse: false
     iot_vmid: "{{ hostvars['iot'].proxmox_lxc.vmid }}"
-    iot_hass_vmid: 200 # hass_vmid, roles/tenant/hass/defaults/main.yml
+    iot_hass_vmid: 200 # the HAOS VM (replaced by CT113, playbooks/migrate_hass.yml)
     iot_stage: /root/iot-migration
     iot_helper: "{{ iot_stage }}/haos_exec.py"
     iot_haos_data: /mnt/data/supervisor
