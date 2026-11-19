@@ -1,0 +1,16 @@
+---
+# Pinned release for both upstream images (bunkerity/bunkerweb and
+# bunkerity/bunkerweb-scheduler must always match). Never `latest`. Upgrade procedure:
+# read the release notes, compare upstream misc/integrations/docker.yml at the target
+# tag with files/nixos/configuration.nix, bump this, and rerun playbooks/configure.yml.
+bunkerweb_version: 1.6.17
+
+# ModSecurity (OWASP CRS) mode for every site: DetectionOnly logs what would have been
+# blocked without blocking it. Flip to "On" once the Matrix/Seafile/Hermes clients have
+# run for a while without false positives in `docker logs bunkerweb`.
+bunkerweb_modsecurity_engine: DetectionOnly
+
+# Frigate's dmz (VLAN 6) ULA, where go2rtc publishes WebRTC media on 8555 — the
+# frigate-dmz lease (hostid 22) in host_vars/prydwen.yml. Not the inventory address,
+# which is frigate's backend (VLAN 3) NIC, where 8555 is firewalled off.
+bunkerweb_frigate_webrtc_upstream: fd5a:715f:1edc:a706::22

@@ -7,7 +7,9 @@ let
   gatewayAddress = "fd5a:715f:1edc:a706::29";
   agentAddress = "fd5a:715f:1edc:a703::28";
   homeserverName = site.matrixHostName;
-  homeserverAddress = "fd5a:715f:1edc:a706::27";
+  # The public edge (roles/tenant/bunkerweb): terminates TLS for every *.us hostname,
+  # including the homeserver's, and is the only client allowed on this guest's port 80.
+  edgeAddress = site.edgeAddress;
   publicName = site.hermesHostName;
   stateDir = "/var/lib/hermes";
   backupPath = "/mnt/hermes-gateway-backup";
@@ -29,8 +31,14 @@ in
   };
 
   networking = {
-    hosts."${homeserverAddress}" = [ homeserverName ];
-    firewall.allowedTCPPorts = [ 80 443 ];
+    # No hosts pin for the homeserver: matrix (CT106) no longer serves TLS, so the Matrix
+    # client follows public DNS to the edge like every other client and gets the real
+    # *.us certificate.
+    # Port 80 (the plain-HTTP origin) is open to the edge only; nixos-fw is rebuilt on
+    # every firewall (re)start, so -A stays idempotent.
+    firewall.extraCommands = ''
+      ip6tables -A nixos-fw -p tcp --dport 80 -s ${edgeAddress} -j nixos-fw-accept
+    '';
   };
 
   # No inbound SSH; managed with `pct exec` from the Proxmox host, like hermes.
@@ -66,21 +74,16 @@ in
   users.users.hermes.uid = 1000;
   users.groups.hermes.gid = 1000;
 
-  security.acme = {
-    acceptTerms = true;
-    defaults.email = site.acmeEmail;
-  };
+  # Plain-HTTP origin for the edge, which terminates TLS (*.us wildcard). [::] rather
+  # than the ULA because the DHCPv6 address may not exist yet when nginx starts; the
+  # firewall above limits the listener to the edge.
   services.nginx = {
     enable = true;
-    recommendedTlsSettings = true;
     recommendedOptimisation = true;
     recommendedGzipSettings = true;
     virtualHosts.${publicName} = {
-      forceSSL = true;
-      enableACME = true;
       listen = [
         { addr = "[::]"; port = 80; }
-        { addr = "[::]"; port = 443; ssl = true; }
       ];
       locations."/" = {
         proxyPass = "http://[${agentAddress}]:9119";
@@ -89,7 +92,7 @@ in
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_read_timeout 3600s;
           client_max_body_size 20M;
         '';

@@ -1,3 +1,11 @@
 ---
 frigate_smb_username: frigateuser
 frigate_smb_password: "{{ vault_frigate_smb_password }}"
+
+# Credentials rendered into templates/config.yaml.j2 (the camera stream URLs embed the
+# camera logins). Real values live in the encrypted group_vars/all/vault.yml.
+frigate_cam_indoor_stream: "{{ vault_frigate_cam_indoor_stream }}"
+frigate_cam_outdoor_stream: "{{ vault_frigate_cam_outdoor_stream }}"
+frigate_mqtt_host: "{{ vault_frigate_mqtt_host }}"
+frigate_mqtt_user: "{{ vault_frigate_mqtt_user }}"
+frigate_mqtt_password: "{{ vault_frigate_mqtt_password }}"

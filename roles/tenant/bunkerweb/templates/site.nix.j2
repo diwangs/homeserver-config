@@ -1,0 +1,23 @@
+# {{ ansible_managed }}
+# Public identity, image pin and upstreams for configuration.nix. The hostnames and
+# ACME contact come from the vault (group_vars/all/vars.yml) so they never sit in the
+# committed flake tree. JSON string literals are valid Nix strings, hence to_json.
+# NO secrets belong here: this file is copied into /nix/store (world-readable) and
+# baked into the image. The DNS-01 token goes to a root-only runtime file
+# (tasks/secrets.yml).
+{
+  acmeEmail = {{ acme_email | to_json }};
+  bunkerwebVersion = {{ bunkerweb_version | string | to_json }};
+  modsecurityEngine = {{ bunkerweb_modsecurity_engine | to_json }};
+  matrixHostName = {{ matrix_hostname | to_json }};
+  hermesHostName = {{ hermes_hostname | to_json }};
+  seafileHostName = {{ seafile_hostname | to_json }};
+  # Each origin's stable dmz ULA (inventory), plain HTTP on port 80.
+  matrixUpstream = {{ hostvars['matrix'].ansible_host | to_json }};
+  hermesUpstream = {{ hostvars['hermes-gateway'].ansible_host | to_json }};
+  seafileUpstream = {{ hostvars['seafile'].ansible_host | to_json }};
+  # The web UI is published on the edge's own dmz ULA only (LAN-reachable, not public).
+  uiBindAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
+  # go2rtc's WebRTC media port on Frigate's dmz NIC, relayed by the edge (nginx stream).
+  frigateWebrtcUpstream = {{ bunkerweb_frigate_webrtc_upstream | to_json }};
+}

@@ -1,4 +1,16 @@
 ---
+# Frigate's config lives on the CIFS share (/mnt/frigate/config, the container's /config)
+# but is owned by this repo: UI edits are overwritten here. A changed config restarts
+# Frigate (handler), since Frigate only reads it at startup.
+- name: Render the Frigate config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /mnt/frigate/config/config.yaml
+    mode: "0660"
+    backup: true
+  no_log: true
+  notify: Restart Frigate
+
 - name: Create Frigate container
   community.docker.docker_container:
     name: frigate
@@ -14,12 +26,15 @@
     #     the container, so it can't be published on the IPv6 backend (docker-proxy
     #     would forward to the container's IPv6, where nothing listens). Left local.
     #   - 8554/1984 (go2rtc, IPv6-capable inside) on the backend (VLAN 3) ULA ::22.
-    #   - 8555 WebRTC media on all IPv6 interfaces (serves the DMZ ULA + eth6 GUA;
-    #     both are IPv6, so [::] not 0.0.0.0 — the latter would only land on eth4's
-    #     IPv4). Kept off the backend by a PVE firewall rule dropping 8555 on eth3.
+    #   - 8555 WebRTC media on all IPv6 interfaces ([::], not 0.0.0.0, which would
+    #     only land on eth4's IPv4). Kept off the backend by a PVE firewall rule
+    #     dropping 8555 on eth3. Nothing forwards it from the internet: LAN clients
+    #     use the dmz ULA directly (UDP or TCP), and remote clients reach it over TCP
+    #     via the BunkerWeb edge (CT110, frigate-webrtc.us), which relays
+    #     8555/tcp to this guest's dmz ULA.
     # WebRTC ICE candidates must be set in Frigate's go2rtc config (on the mounted
-    # /config volume) to the DMZ ULA + public domain — the container can't observe
-    # its host-side address behind NAT.
+    # /config volume) to the DMZ ULA and frigate-webrtc.us (a CNAME to the edge) —
+    # the container can't observe either address behind NAT. See README.md.
     ports:
       - "127.0.0.1:5000:5000"
       - "127.0.0.1:8971:8971"

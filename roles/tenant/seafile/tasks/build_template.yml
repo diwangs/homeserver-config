@@ -29,8 +29,8 @@
   delegate_to: localhost
   changed_when: false
 
-# site.nix carries the public identity (hostname, ACME contact) from the
-# vault plus the pinned image tags; it holds no secret (the build output goes into
+# site.nix carries the public identity (hostname) from the vault, the edge's
+# address and the pinned image tags; it holds no secret (the build output goes into
 # /nix/store and the template) and is not committed, so it is rendered beside the static tree.
 - name: Render the public identity module
   ansible.builtin.template:

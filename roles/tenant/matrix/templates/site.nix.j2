@@ -5,5 +5,6 @@
 {
   serverName = {{ matrix_server_name | to_json }};
   hostName = {{ matrix_hostname | to_json }};
-  acmeEmail = {{ acme_email | to_json }};
+  # The public edge (roles/tenant/bunkerweb), the only client allowed on port 80.
+  edgeAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
 }

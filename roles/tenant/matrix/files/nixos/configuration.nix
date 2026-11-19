@@ -15,6 +15,10 @@ let
   # the server is reached); changing serverName above is not.
   hostName = site.hostName;
 
+  # The public edge (roles/tenant/bunkerweb, CT110): terminates TLS for the hostname and
+  # is the only client allowed to reach the plain-HTTP origin below.
+  edgeAddress = site.edgeAddress;
+
   # Bind mount of /mnt/frontpanel-pool/frontpanel-dataset/Backup/matrix on the
   # Proxmox host; see roles/matrix/tasks/config_lxc.yml.
   backupPath = "/mnt/matrix-backup";
@@ -73,11 +77,12 @@ in
 
   networking = {
     domain = serverName;
-    firewall.allowedTCPPorts = [
-      80 # ACME HTTP-01 challenge (required for cert renewal) + redirect to https
-      443 # Matrix client-server API
-      8448 # Matrix federation, for servers that skip the .well-known delegation
-    ];
+    # Port 80 (the plain-HTTP origin) is open to the edge only. Nothing else listens;
+    # TLS, :443 and the public address all belong to roles/tenant/bunkerweb. nixos-fw
+    # is flushed and rebuilt on every firewall (re)start, so -A stays idempotent.
+    firewall.extraCommands = ''
+      ip6tables -A nixos-fw -p tcp --dport 80 -s ${edgeAddress} -j nixos-fw-accept
+    '';
   };
 
   # ── Access ────────────────────────────────────────────────────────────────
@@ -105,7 +110,7 @@ in
     enable = true;
     settings.global = {
       server_name = serverName;
-      # Loopback only — nginx below terminates TLS and proxies in.
+      # Loopback only — nginx below is the origin the edge proxies to.
       address = [ "::1" "127.0.0.1" ];
       port = [ 6167 ];
 
@@ -195,42 +200,22 @@ in
     };
   };
 
-  # ── TLS / reverse proxy ───────────────────────────────────────────────────
-  # HTTP-01, so there is no ACME credential anywhere in this deployment. Let's
-  # Encrypt proves ownership by fetching a challenge file over port 80, which only
-  # needs the AAAA record to be correct — and prydwen's ddns already guarantees
-  # that. DNS-01 would additionally need a Cloudflare token with Zone:DNS:Edit
-  # living on a public-facing host, to solve a problem ddns has already solved.
-  #
-  # The tradeoff this accepts: renewal now depends on inbound port 80. That is
-  # open end to end — forward_wan_dmz permits WAN->DMZ with no port filter, and the
-  # PVE firewall is disabled node-wide, so `firewall=1` on the netif is inert.
-  security.acme = {
-    acceptTerms = true;
-    defaults.email = site.acmeEmail;
-  };
-
+  # ── Origin for the edge ───────────────────────────────────────────────────
+  # TLS is terminated by roles/tenant/bunkerweb (one *.us wildcard over DNS-01), which
+  # proxies here over plain HTTP on the dmz. So there is no certificate, no ACME and no
+  # :443/:8448 on this guest any more. Federation goes through :443 on the edge only:
+  # the delegation (.well-known/matrix/server, here and at the apex) already says :443.
   services.nginx = {
     enable = true;
-    recommendedTlsSettings = true;
     recommendedOptimisation = true;
     recommendedGzipSettings = true;
     recommendedProxySettings = true;
 
     virtualHosts.${hostName} = {
-      forceSSL = true;
-      # Provisions the cert over HTTP-01 and serves /.well-known/acme-challenge on
-      # the plain :80 listener below; forceSSL redirects everything else to https.
-      enableACME = true;
-      # Federation listener. Delegation points at :443, so :8448 is belt-and-braces
-      # for servers that try the well-known port directly.
+      # [::] rather than the ULA: the DHCPv6 address may not exist yet when nginx
+      # starts. The firewall above is what limits this listener to the edge.
       listen = [
-        { addr = "[::]"; port = 443; ssl = true; }
-        { addr = "0.0.0.0"; port = 443; ssl = true; }
-        { addr = "[::]"; port = 8448; ssl = true; }
-        { addr = "0.0.0.0"; port = 8448; ssl = true; }
         { addr = "[::]"; port = 80; }
-        { addr = "0.0.0.0"; port = 80; }
       ];
 
       locations."/_matrix/" = {

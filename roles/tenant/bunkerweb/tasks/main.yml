@@ -1,0 +1,24 @@
+---
+# Reconcile the running BunkerWeb guest. Runs in-guest via `pct exec` through the Proxmox
+# host (group_vars/tenant_lxc.yml), from playbooks/configure.yml.
+#
+# Same shape as roles/tenant/seafile: one flake tree and one `nixos-rebuild`. The same
+# tree built the image (tasks/build_template.yml). The Docker engine, the bw-net bridge
+# and both containers (virtualisation.oci-containers) live in files/nixos/configuration.nix,
+# including every BunkerWeb setting; there is no web UI to drift from it.
+#
+# No Portainer and no autoconf: this guest is the internet edge and neither may hold the
+# Docker socket.
+- name: Validate BunkerWeb inputs
+  ansible.builtin.import_tasks: validate.yml
+
+# Before the rebuild: the container units skip themselves (ConditionPathExists) until
+# the env file exists, so the credential must be in place when the stack first starts.
+- name: Install the BunkerWeb runtime credentials
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Deploy the BunkerWeb NixOS configuration
+  ansible.builtin.import_tasks: nixos.yml
+
+- name: Start the BunkerWeb stack
+  ansible.builtin.import_tasks: stack.yml

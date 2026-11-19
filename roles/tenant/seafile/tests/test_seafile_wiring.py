@@ -171,23 +171,22 @@ class SeafileWiring(unittest.TestCase):
         self.assertEqual(nix_string("secretsDir"), vars_["seafile_secrets_dir"])
         self.assertIn('"${dataDir}:/shared"', config_nix())
 
-    def test_ddns_publishes_the_dmz_lease(self):
+    def test_ddns_service_is_retired(self):
+        # The hostname is a CNAME to the BunkerWeb edge (edge_hostname, kept current by its own
+        # ddns services); a per-name ddns service would overwrite the CNAME with an address, so
+        # it is removed from the router rather than just dropped from desired state.
         prydwen = load("host_vars/prydwen.yml")
-        svc = next(s for s in prydwen["prydwen_uci_sections"] if s.get("name") == "seafile" and s.get("config") == "ddns")
-        self.assertEqual(svc["find"]["lookup_host"], "{{ seafile_hostname }}")
-        self.assertIn("prydwen_dmz_device", svc["value"]["ip_script"])
-        self.assertIn("hostname='seafile'", svc["value"]["ip_script"])
-        self.assertTrue(svc["secret"])
-        self.assertEqual(svc["value"]["domain"], "seafile.us@{{ public_domain }}")
+        self.assertFalse(
+            [s for s in prydwen["prydwen_uci_sections"] if s.get("config") == "ddns" and s.get("name") == "seafile"]
+        )
+        self.assertIn(
+            {"config": "ddns", "type": "service", "find": {"lookup_host": "{{ seafile_hostname }}"}},
+            prydwen["prydwen_uci_absent_sections"],
+        )
 
     def test_hostname_derives_from_vaulted_domain(self):
         v = load("group_vars/all/vars.yml")
         self.assertEqual(v["seafile_hostname"], "seafile.us.{{ public_domain }}")
-
-    def test_proxy_template_routes_seafile(self):
-        conf = (ROOT / "extern/ipv4-proxy/nginx.conf.example").read_text()
-        self.assertIn("seafile.us.example.org   seafile.us.example.org:443;", conf)
-        self.assertIn("seafile.us.example.org seafile.us.example.org:80;", conf)
 
     def test_site_nix_template_matches_what_nix_reads(self):
         template = (ROLE / "templates/site.nix.j2").read_text()
@@ -262,11 +261,9 @@ class SeafileWiring(unittest.TestCase):
     def test_images_are_pinned(self):
         d = load("roles/tenant/seafile/defaults/main.yml")
         self.assertRegex(str(d["seafile_version"]), r"^\d+\.\d+\.\d+$")
-        self.assertEqual(
-            (d["seafile_db_image"], d["seafile_redis_image"], d["seafile_caddy_image"]),
-            ("mariadb:10.11", "redis:7", "caddy:2"),
-        )
-        for image in (d["seafile_db_image"], d["seafile_redis_image"], d["seafile_caddy_image"]):
+        self.assertEqual((d["seafile_db_image"], d["seafile_redis_image"]), ("mariadb:10.11", "redis:7"))
+        self.assertNotIn("seafile_caddy_image", d)  # TLS moved to roles/tenant/bunkerweb
+        for image in (d["seafile_db_image"], d["seafile_redis_image"]):
             self.assertRegex(image, r":[\w.]+$")
             self.assertNotIn("latest", image)
         self.assertIn('"seafileltd/seafile-mc:${site.seafileVersion}"', config_nix())

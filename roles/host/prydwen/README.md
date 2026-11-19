@@ -59,7 +59,7 @@ takes interfaces down or reconnects the WAN.
 The exceptions are explicit:
 
 - `tor` registers no reload trigger, so a `tor`/`tor-hs` change restarts it.
-- A changed `setupjool.sh` re-runs it (it recreates the Jool namespace).
+- A changed `setupjool.sh` re-runs it: it creates the Jool namespace only if missing, and always (idempotently) re-applies the static inbound NAT64 mappings.
 - A changed `lan-qos` init script restarts `lan-qos`.
 - Router SSH keys and the root password apply on the next login; nothing restarts.
 

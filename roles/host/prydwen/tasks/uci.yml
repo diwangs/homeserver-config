@@ -1,4 +1,10 @@
 ---
+# `prydwen_uci_only` (a list of section names, default empty = everything) narrows a run to
+# those entries of prydwen_uci_sections and skips the deletion/option/value loops, e.g.
+#   ansible-playbook playbooks/configure.yml --limit prydwen -e '{"prydwen_uci_only": ["rule_x"]}'
+# A full reconcile is ~100 small router round-trips and takes minutes; use the filter when
+# only a few entries changed, and run it unfiltered afterwards to confirm nothing drifted.
+#
 # Every task commits its change (autocommit) and registers its result, so the
 # "Apply prydwen UCI changes" handler can tell procd exactly which config packages
 # changed — the same config.change event LuCI's apply / reload_config sends.
@@ -10,6 +16,7 @@
     find: "{{ item.find }}"
     autocommit: true
   loop: "{{ prydwen_uci_absent_sections }}"
+  when: not (prydwen_uci_only | length > 0)
   loop_control:
     label: "{{ item.config }} {{ item.type }} {{ item.find }}"
   register: prydwen_uci_absent_sections_result
@@ -21,6 +28,7 @@
     key: "{{ item }}"
     autocommit: true
   loop: "{{ prydwen_uci_absent_options }}"
+  when: not (prydwen_uci_only | length > 0)
   register: prydwen_uci_absent_options_result
   notify: Apply prydwen UCI changes
 
@@ -32,6 +40,7 @@
     replace: false
     autocommit: true
   loop: "{{ prydwen_uci_values }}"
+  when: not (prydwen_uci_only | length > 0)
   loop_control:
     label: "{{ item.key }}"
   register: prydwen_uci_values_result
@@ -49,7 +58,9 @@
     replace: "{{ item.replace | default(true) }}"
     keep_keys: "{{ item.keep_keys | default([]) }}"
     autocommit: true
-  loop: "{{ prydwen_uci_sections }}"
+  loop: >-
+    {{ prydwen_uci_sections if not (prydwen_uci_only | length > 0)
+       else prydwen_uci_sections | selectattr('name', 'in', prydwen_uci_only) | list }}
   loop_control:
     label: "{{ item.config }}.{{ item.name }}"
   no_log: "{{ item.secret | default(false) }}"

@@ -7,3 +7,9 @@
   ansible.builtin.service:
     name: caddy
     state: restarted
+
+# Frigate reads /config/config.yaml only at startup. Restarting the existing container
+# (rather than recreating it) keeps it on the same image and mounts.
+- name: Restart Frigate
+  ansible.builtin.command: docker restart frigate
+  changed_when: true

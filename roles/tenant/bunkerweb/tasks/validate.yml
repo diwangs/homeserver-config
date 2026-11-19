@@ -1,0 +1,48 @@
+---
+# Fail fast, before anything is changed in the guest: without the token the scheduler
+# cannot issue the wildcard, and every site would serve BunkerWeb's self-signed fallback.
+- name: Require the Cloudflare DNS-01 token
+  ansible.builtin.assert:
+    that:
+      - bunkerweb_cloudflare_api_token | length >= 32
+      # Written as a `KEY=value` line for `docker run --env-file`: a line break would
+      # end the value early and turn the rest into another variable.
+      - bunkerweb_cloudflare_api_token is not search('[\s]')
+    fail_msg: >-
+      Missing or invalid vault_openwrt_cloudflare_api_token in group_vars/all/vault.yml
+      (a Cloudflare API token with Zone:DNS:Edit on the public zone, one line).
+    quiet: true
+  no_log: true
+
+- name: Require the web UI admin login
+  ansible.builtin.assert:
+    that:
+      - bunkerweb_ui_admin_username is match('^[A-Za-z0-9_.-]{3,32}$')
+      # BunkerWeb's policy: lower, upper, digit and special character; bcrypt caps at 72 bytes.
+      - bunkerweb_ui_admin_password | length >= 12
+      - bunkerweb_ui_admin_password | length <= 72
+      - bunkerweb_ui_admin_password is search('[a-z]')
+      - bunkerweb_ui_admin_password is search('[A-Z]')
+      - bunkerweb_ui_admin_password is search('[0-9]')
+      - bunkerweb_ui_admin_password is search('[^A-Za-z0-9]')
+      # Written as a `KEY=value` line for `docker run --env-file`.
+      - bunkerweb_ui_admin_password is not search('[\s]')
+    fail_msg: >-
+      Missing or weak vault_bunkerweb_ui_admin_username / vault_bunkerweb_ui_admin_password in
+      group_vars/all/vault.yml (12-72 characters with lower, upper, digit and a special
+      character, no whitespace).
+    quiet: true
+  no_log: true
+
+- name: Require the public hostnames
+  ansible.builtin.assert:
+    that:
+      - matrix_hostname is match('^matrix\.us\..+')
+      - hermes_hostname is match('^hermes\.us\..+')
+      - seafile_hostname is match('^seafile\.us\..+')
+      - acme_email | length > 0
+    fail_msg: >-
+      The *.us hostnames (group_vars/all/vars.yml) must sit directly under
+      us.<public_domain>, which is all the wildcard certificate covers; check
+      vault_public_domain and vault_acme_email.
+    quiet: true

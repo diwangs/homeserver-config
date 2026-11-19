@@ -1,0 +1,14 @@
+---
+# DNS-01 for the *.us wildcard. Reuses the router's Cloudflare DDNS token by decision
+# (it already needs Zone:DNS:Edit on the public zone). Rendered only into a root-only
+# runtime env file (tasks/secrets.yml), never into the flake tree, the image or the
+# Nix store. The `default('')` only lets tasks/validate.yml report it missing.
+bunkerweb_cloudflare_api_token: "{{ vault_openwrt_cloudflare_api_token | default('') }}"
+
+# Web UI admin login (templates/ui.env.j2). Seeded on the UI's first start only; changing the
+# vault entry later needs `OVERRIDE_ADMIN_CREDS=yes` (or change it in the UI's profile page).
+bunkerweb_ui_admin_username: "{{ vault_bunkerweb_ui_admin_username | default('') }}"
+bunkerweb_ui_admin_password: "{{ vault_bunkerweb_ui_admin_password | default('') }}"
+
+# Keep in step with secretsDir in files/nixos/configuration.nix.
+bunkerweb_secrets_dir: /var/lib/bunkerweb/secrets

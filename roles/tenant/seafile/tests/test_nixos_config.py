@@ -25,11 +25,10 @@ NIX = shutil.which("nix")
 # must never be reachable from Nix, see test_no_credentials_in_units).
 SITE = """{
   hostName = "seafile.us.example.org";
-  acmeEmail = "ops@example.org";
+  edgeAddress = "fd5a:715f:1edc:a706::2b";
   seafileVersion = "13.0.29";
   dbImage = "mariadb:10.11";
   redisImage = "redis:7";
-  caddyImage = "caddy:2";
   dbUsername = "seafile";
   timeZone = "America/New_York";
 }
@@ -67,9 +66,10 @@ class NixosConfig(unittest.TestCase):
             raise AssertionError(r.stderr)
         return json.loads(r.stdout)
 
-    def test_docker_backend_and_four_containers(self):
+    def test_docker_backend_and_three_containers(self):
         self.assertEqual(self.eval("virtualisation.oci-containers.backend"), "docker")
-        self.assertEqual(set(self.containers), {"seafile-mysql", "seafile-redis", "seafile", "seafile-caddy"})
+        # TLS is terminated by roles/tenant/bunkerweb; there is no Caddy front any more.
+        self.assertEqual(set(self.containers), {"seafile-mysql", "seafile-redis", "seafile"})
 
     def test_images_are_pinned(self):
         images = {n: c["image"] for n, c in self.containers.items()}
@@ -79,23 +79,31 @@ class NixosConfig(unittest.TestCase):
                 "seafile-mysql": "mariadb:10.11",
                 "seafile-redis": "redis:7",
                 "seafile": "seafileltd/seafile-mc:13.0.29",
-                "seafile-caddy": "caddy:2",
             },
         )
         for c in self.containers.values():
             self.assertEqual(c["pull"], "missing")  # a re-pull never moves a pinned tag
 
-    def test_private_network_and_only_caddy_publishes_ports(self):
+    def test_private_network_and_only_seafile_publishes_its_origin(self):
         for name, c in self.containers.items():
             self.assertEqual(c["networks"], ["seafile-net"], name)
-            if name != "seafile-caddy":
+            if name != "seafile":
                 self.assertEqual(c["ports"], [], name)  # database and cache are not public
-        self.assertEqual(self.containers["seafile-caddy"]["ports"], ["80:80", "443:443"])
-        self.assertEqual(self.eval("networking.firewall.allowedTCPPorts"), [80, 443])
+        # Seafile's nginx is IPv4-only, so it is published on IPv4 loopback and a host
+        # TCP relay serves [::]:80 for the (IPv6) edge.
+        self.assertEqual(self.containers["seafile"]["ports"], ["127.0.0.1:8000:80"])
+        self.assertEqual(self.eval("networking.firewall.allowedTCPPorts"), [])
+        self.assertIn(
+            "ip6tables -A nixos-fw -p tcp --dport 80 -s fd5a:715f:1edc:a706::2b -j nixos-fw-accept",
+            self.eval("networking.firewall.extraCommands"),
+        )
+        stream = self.eval("services.nginx.streamConfig")
+        self.assertIn("listen [::]:80;", stream)
+        self.assertIn("proxy_pass 127.0.0.1:8000;", stream)
+        self.assertEqual(self.eval("services.nginx.virtualHosts"), {})  # no http listener to clash with
 
     def test_dependencies_and_health(self):
         self.assertEqual(sorted(self.containers["seafile"]["dependsOn"]), ["seafile-mysql", "seafile-redis"])
-        self.assertEqual(self.containers["seafile-caddy"]["dependsOn"], ["seafile"])
         db = " ".join(self.containers["seafile-mysql"]["extraOptions"])
         self.assertIn("--health-cmd=/usr/local/bin/healthcheck.sh --connect --mariadbupgrade --innodb_initialized", db)
         self.assertIn("--health-start-period=30s", db)
@@ -112,9 +120,6 @@ class NixosConfig(unittest.TestCase):
     def test_storage_semantics_unchanged(self):
         self.assertEqual(self.containers["seafile"]["volumes"], ["/mnt/seafile:/shared"])
         self.assertEqual(self.containers["seafile-mysql"]["volumes"], ["seafile_db:/var/lib/mysql"])
-        caddy = self.containers["seafile-caddy"]["volumes"]
-        self.assertIn("seafile_caddy_data:/data", caddy)
-        self.assertTrue(any(v.endswith("-Caddyfile:/etc/caddy/Caddyfile:ro") for v in caddy))
 
     def test_upstream_environment_preserved(self):
         env = self.containers["seafile"]["environment"]
@@ -183,7 +188,7 @@ class NixosConfig(unittest.TestCase):
         self.assertEqual(svc["SEAFILE_BACKUP_KEEP"], "14")
 
     def test_all_containers_autostart(self):
-        names = ("seafile-mysql", "seafile-redis", "seafile", "seafile-caddy")
+        names = ("seafile-mysql", "seafile-redis", "seafile")
         self.assertEqual(sorted(self.containers), sorted(names))
         for n in names:
             self.assertEqual(

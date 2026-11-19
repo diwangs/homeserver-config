@@ -38,3 +38,6 @@ frigate_webrtc_hostname: "frigate-webrtc.us.{{ public_domain }}"
 matrix_hostname: "matrix.us.{{ public_domain }}"
 hermes_hostname: "hermes.us.{{ public_domain }}"
 seafile_hostname: "seafile.us.{{ public_domain }}"
+# The BunkerWeb edge (roles/tenant/bunkerweb). ddns keeps its A/AAAA current; the *.us
+# service names (and frigate_webrtc_hostname) are CNAMEs to it.
+edge_hostname: "edge.us.{{ public_domain }}"

@@ -14,7 +14,6 @@ seafile_version: 13.0.29
 # here so a re-pull cannot change it.
 seafile_db_image: mariadb:10.11
 seafile_redis_image: redis:7
-seafile_caddy_image: caddy:2
 
 seafile_db_username: seafile
 seafile_time_zone: America/New_York

@@ -11,36 +11,37 @@ Two NixOS LXCs share one pinned Hermes flake but have separate state and process
 | VMID / name | 107 / `hermes` | 108 / `hermes-gateway` |
 | Network | VLAN 3, `fd5a:715f:1edc:a703::28` | VLAN 6, `fd5a:715f:1edc:a706::29` |
 | Memory / swap | 8 / 8 GiB | 2 / 2 GiB |
-| Services | Agent API :8642, dashboard :9119 | Matrix gateway, nginx :80/:443 |
-| Public name | Behind CT108 only | `hermes.us.example.org` (direct AAAA, Fly A) |
+| Services | Agent API :8642, dashboard :9119 | Matrix gateway, nginx :80 (origin for the edge) |
+| Public name | Behind CT108 only | `hermes.us.example.org` (via the BunkerWeb edge, CT110) |
 | Backup path on host | `Backup/hermes` | `Backup/hermes-gateway` |
 
 CT108 runs upstream `hermes gateway` in proxy mode. It decrypts Matrix messages,
 forwards turns to CT107 over the authenticated API, and encrypts replies. CT107
 keeps model credentials, sessions, tools, and the dashboard. The dashboard uses
 Nous Portal OAuth client `agent:cmuqdu4i60002qe06c1a72bve` and the public
-callback `https://hermes.us.example.org/auth/callback`. IPv6 clients reach
-CT108 directly; IPv4 clients reach it through the shared Fly proxy.
+callback `https://hermes.us.example.org/auth/callback`. Public clients reach
+CT108 only through the BunkerWeb edge (`roles/tenant/bunkerweb`), which
+terminates TLS (IPv6 directly, IPv4 through the router's Jool NAT64).
 
 ## Network and secrets
 
 Prydwen reserves CT108's hostid `29` with MAC `BC:24:11:6C:29:01`, DUID
-`00020000ab116865726d6777006c`, and IAID `0x686d6777`. Its DDNS service
-updates the direct, DNS-only AAAA record from the current VLAN 6 lease. The
-first record must exist before DDNS can update it; create it from CT108's GUA
-once the container boots. HTTP-01 on port 80 issues the nginx certificate.
-The DNS-only A record points at the existing Fly app's dedicated IPv4. The Fly
-nginx proxy routes port 443 by TLS SNI, forwards only Hermes's HTTP-01 challenge
-path on port 80 to CT108 over IPv6, and redirects other Hermes HTTP requests to
-HTTPS. CT108 still owns the TLS certificate and OAuth callback; Fly does not
-decrypt HTTPS. The Fly app and its IPv4 address are shared with Nextcloud and
-Matrix, so an outage there affects their IPv4 access together.
+`00020000ab116865726d6777006c`, and IAID `0x686d6777`; that address is only
+used inside the house. `hermes.us.example.org` is a CNAME to `edge.us.example.org`, the
+BunkerWeb edge, which holds the `*.us` wildcard (DNS-01) and proxies to CT108's nginx over
+plain HTTP on its ULA; CT108 has no certificate of its own. The router forwards nothing
+from wan to CT108.
+
+CT108's Matrix client reaches the homeserver by its public name, through the edge like
+any other client, so it gets the real certificate. Its traffic is a few long-polls a
+minute, well under the edge's rate limits.
 
 The router's existing VLAN 6 to VLAN 3 forwarding is unchanged. CT107's NixOS
 firewall accepts API :8642 only from CT108 and dashboard :9119 only from CT108
 or VLAN 2 management. Neither guest runs sshd;
 Ansible manages both with `pct exec` through the Proxmox host. CT108 accepts
-public :80/:443 only.
+:80 from the edge's ULA only (`networking.firewall.extraCommands`); the router
+forwards nothing from wan to it.
 
 The Matrix token and cross-signing recovery key stay in
 `vault_hermes_matrix_token` and `vault_hermes_matrix_recovery_key`; both are
@@ -68,14 +69,12 @@ basic-auth password remains in the vault for rollback only.
    digest, enables CT108's gateway, then switches CT107 to API-only mode.
 5. Verify an encrypted Matrix message, a reply, OAuth sign-in, and that CT107's
    API rejects requests without the bearer key. Check `systemctl status
-   hermes-agent` on both guests, `hermes-backend` on CT107, and nginx/ACME on
+   hermes-agent` on both guests, `hermes-backend` on CT107, and nginx on
    CT108. Confirm CT108 stays below its 2 GiB memory limit in normal use.
 
-For IPv4 ingress, deploy `extern/ipv4-proxy/` to the existing
-IPv4 proxy Fly app (`vault_fly_app_name`), then create a DNS-only A record for
-`hermes.us.example.org` pointing at that app's dedicated IPv4. Keep the
-DDNS-managed AAAA record. Check HTTPS, the HTTP redirect, and the HTTP-01
-challenge path over IPv4 after publishing the A record.
+Public ingress is the BunkerWeb edge (`roles/tenant/bunkerweb/README.md`):
+`hermes.us.example.org` is a CNAME to `edge.us.example.org`. Check HTTPS and the HTTP
+redirect over both IPv4 and IPv6 after changing the records.
 
 When running Ansible from the sandboxed workstation, override the default SSH
 ControlMaster path for the sentinel-lp/prydwen connections, which may be blocked by

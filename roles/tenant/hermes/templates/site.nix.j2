@@ -7,6 +7,7 @@
   matrixServerName = {{ matrix_server_name | to_json }};
   matrixHostName = {{ matrix_hostname | to_json }};
   hermesHostName = {{ hermes_hostname | to_json }};
-  acmeEmail = {{ acme_email | to_json }};
+  # The public edge (roles/tenant/bunkerweb); see gateway-configuration.nix.
+  edgeAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
   matrixAllowedUsers = {{ hermes_matrix_allowed_users | to_json }};
 }

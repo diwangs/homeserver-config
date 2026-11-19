@@ -50,11 +50,10 @@ roles/
     docker_host, portainer, cifs_mount, journald, disable_ssh
   tenant/               one role per tenant service
     hass, nas, omada, frigate, nextcloud, seedbox, immich, matrix, hermes, hermes_gateway,
-    seafile
+    seafile, bunkerweb (the public HTTP(S) edge; see roles/tenant/bunkerweb/README.md)
   maintenance/
     debian_dist_upgrade used by playbooks/upgrade_lxc_dist.yml
 docs/network.md          network design notes
-extern/                  non-Ansible deployments (Fly.io IPv4 proxy)
 ```
 The four role directories are listed explicitly in `ansible.cfg`; playbooks use
 short role names such as `proxmox_lxc` and `frigate`.

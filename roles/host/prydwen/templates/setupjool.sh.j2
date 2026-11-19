@@ -5,21 +5,18 @@ namespace='{{ prydwen_jool.namespace }}'
 peer='{{ prydwen_jool.peer_device }}'
 router='{{ prydwen_jool.router_device }}'
 
-if ip netns list | awk '{ print $1 }' | grep -qx "$namespace"; then
-    exit 0
-fi
+create_namespace() {
+    cleanup() {
+        ip netns del "$namespace" 2>/dev/null || true
+        ip link del "$router" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
 
-cleanup() {
-    ip netns del "$namespace" 2>/dev/null || true
-    ip link del "$router" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
+    ip link add "$router" type veth peer "$peer"
+    ip netns add "$namespace"
+    ip link set dev "$peer" netns "$namespace"
 
-ip link add "$router" type veth peer "$peer"
-ip netns add "$namespace"
-ip link set dev "$peer" netns "$namespace"
-
-ip netns exec "$namespace" sh <<'EOF'
+    ip netns exec "$namespace" sh <<'NS'
 set -eu
 sysctl -w net.ipv4.conf.all.forwarding=1
 sysctl -w net.ipv6.conf.all.forwarding=1
@@ -36,6 +33,24 @@ jool global update lowest-ipv6-mtu 1500
 jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --tcp
 jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --udp
 jool pool4 add {{ prydwen_jool.translator_address }} {{ prydwen_jool.translated_ports }} --icmp
-EOF
+NS
 
-trap - EXIT INT TERM
+    trap - EXIT INT TERM
+}
+
+if ! ip netns list | awk '{ print $1 }' | grep -qx "$namespace"; then
+    create_namespace
+fi
+
+# Static NAT64 mappings for inbound IPv4: a connection the router DNATs to
+# <translator>#<translated port> is translated to <ipv6>#<port>, so an IPv4-only client can
+# reach an IPv6-only host (the BunkerWeb edge) with no IPv4 on the dmz. The source becomes
+# 64:ff9b::<client IPv4>. The IPv4 port must lie inside pool4 (translated_ports). Applied on
+# every run, so a namespace that already exists picks up new entries; an entry that is
+# already there makes `bib add` fail, which is fine as long as it is listed as *static* (a
+# dynamic entry squatting on the port must fail the script, not pass). The ports sit at the top
+# of pool4 because dynamic NAT64 allocations start from its bottom.
+{% for m in prydwen_jool_inbound %}
+ip netns exec "$namespace" jool bib add '{{ m.ipv6 }}#{{ m.port }}' '{{ prydwen_jool.translator_address }}#{{ m.translated_port }}' --tcp 2>/dev/null \
+    || ip netns exec "$namespace" jool bib display --tcp --numeric | grep -Fq '[Static TCP] {{ prydwen_jool.translator_address }}#{{ m.translated_port }}'
+{% endfor %}

@@ -1,16 +1,16 @@
 # {{ ansible_managed }}
-# Public identity and pinned image tags for configuration.nix. The hostname and ACME
-# contact come from the vault (group_vars/all/vars.yml) so they never sit in the
+# Public identity, edge address and pinned image tags for configuration.nix. The
+# hostname comes from the vault (group_vars/all/vars.yml) so it never sits in the
 # committed flake tree. JSON string literals are valid Nix strings, hence to_json.
 # NO secrets belong here: this file is copied into /nix/store (world-readable) and
 # baked into the image. Credentials go to root-only env files via tasks/secrets.yml.
 {
   hostName = {{ seafile_hostname | to_json }};
-  acmeEmail = {{ acme_email | to_json }};
+  # The public edge (roles/tenant/bunkerweb), the only client allowed on port 80.
+  edgeAddress = {{ hostvars['bunkerweb'].ansible_host | to_json }};
   seafileVersion = {{ seafile_version | string | to_json }};
   dbImage = {{ seafile_db_image | to_json }};
   redisImage = {{ seafile_redis_image | to_json }};
-  caddyImage = {{ seafile_caddy_image | to_json }};
   dbUsername = {{ seafile_db_username | to_json }};
   timeZone = {{ seafile_time_zone | to_json }};
 }

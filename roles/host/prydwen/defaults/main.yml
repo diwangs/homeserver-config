@@ -29,3 +29,6 @@ prydwen_jool:
   pool6: 64:ff9b::/96
   reserved_ports: 32768-32999
   translated_ports: 33000-65535
+
+# Names from prydwen_uci_sections to reconcile alone (see tasks/uci.yml). Empty = all.
+prydwen_uci_only: []

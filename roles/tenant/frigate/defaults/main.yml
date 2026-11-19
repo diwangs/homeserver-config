@@ -1,0 +1,14 @@
+---
+# Frigate's dmz (VLAN 6) ULA: the frigate-dmz lease (hostid 22) in host_vars/prydwen.yml,
+# where go2rtc's WebRTC media port (8555) is reachable from the LAN and from the
+# BunkerWeb edge, which relays remote clients' TCP 8555 (IPv4 and IPv6) here.
+frigate_dmz_address: fd5a:715f:1edc:a706::22
+
+# go2rtc WebRTC ICE candidates (templates/config.yaml.j2). Under Docker NAT go2rtc can't
+# discover its own addresses, so they are listed: the dmz ULA for LAN clients (UDP or
+# TCP), and frigate-webrtc.us, a CNAME to the edge, for remote clients (TCP only, via
+# the edge's relay). No stun: candidate: nothing forwards 8555 from the internet to
+# this guest directly.
+frigate_webrtc_candidates:
+  - "[{{ frigate_dmz_address }}]:8555"
+  - "{{ frigate_webrtc_hostname }}:8555"

@@ -1,0 +1,20 @@
+---
+# The container units skip themselves while the env file is missing, and a running
+# unit keeps the environment it was created with, so after the rebuild make sure each
+# unit is up — and the scheduler recreated when its credential just changed on an
+# existing guest. Settings changes need nothing here: they are part of the unit, so
+# nixos-rebuild already restarted the scheduler, which re-renders and pushes the config.
+
+- name: Start the BunkerWeb instance and scheduler
+  ansible.builtin.systemd_service:
+    name: "{{ item.unit }}"
+    state: "{{ 'restarted' if item.restart else 'started' }}"
+  loop:
+    - unit: docker-bunkerweb.service
+      restart: false
+    - unit: docker-bunkerweb-scheduler.service
+      restart: "{{ bunkerweb_scheduler_env is changed and bunkerweb_scheduler_env_before.stat.exists }}"
+    - unit: docker-bunkerweb-ui.service
+      restart: "{{ bunkerweb_ui_env is changed and bunkerweb_ui_env_before.stat.exists }}"
+  loop_control:
+    label: "{{ item.unit }}"

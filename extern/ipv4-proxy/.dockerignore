@@ -1,5 +1,0 @@
-# Explicit so flyctl never falls back to the repo .gitignore: nginx.conf and
-# fly.toml are gitignored (they hold the real hostnames) but must still be sent
-# as build context.
-*.example
-README.md

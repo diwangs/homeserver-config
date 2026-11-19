@@ -47,3 +47,28 @@
     - not ansible_check_mode
     - prydwen_jool.namespace not in prydwen_namespaces.stdout
   changed_when: true
+
+# ddns runs one long-lived updater process per service, and a removed service keeps its
+# updater (and keeps rewriting its DNS record) until ddns is restarted. The UCI handler
+# only signals packages changed in the current run, so a run that dies after committing
+# a ddns change (but before its handlers) leaves stale updaters behind that no later run
+# would notice — that is how deleted services once reverted live records. So compare the
+# running updaters with the configured services on every run and restart on any drift.
+- name: Compare running ddns updaters with the configured services
+  ansible.builtin.raw: >-
+    configured=$(uci -q show ddns | sed -n 's/^ddns\.\([^.=]*\)=service$/\1/p' | sort | tr '\n' ' ');
+    running=$(ps w | sed -n 's/.*dynamic_dns_updater\.sh -S \([^ ]*\).*/\1/p' | sort -u | tr '\n' ' ');
+    echo "configured=$configured"; echo "running=$running";
+    [ "$configured" = "$running" ] && echo IN_SYNC || echo DRIFT
+  register: prydwen_ddns_drift
+  check_mode: false
+  changed_when: false
+  when: not prydwen_bootstrap_mode | bool
+
+- name: Restart ddns when its updaters drifted from the configuration
+  community.openwrt.service:
+    name: ddns
+    state: restarted
+  when:
+    - not prydwen_bootstrap_mode | bool
+    - "'DRIFT' in prydwen_ddns_drift.stdout"

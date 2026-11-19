@@ -37,20 +37,12 @@ let
   dbHost = "seafile-mysql";
   redisHost = "seafile-redis";
 
-  # Static TLS front instead of upstream's caddy-docker-proxy, so the one container
-  # exposed to the internet does not get /var/run/docker.sock (root on the guest).
-  # Caddy obtains and renews the certificate itself (ACME HTTP-01 / TLS-ALPN-01, both
-  # reach this guest directly or through the Fly IPv4 proxy, which passes TLS through).
-  # Seafile's own nginx stays plain HTTP on seafile-net.
-  caddyfile = pkgs.writeText "Caddyfile" ''
-    {
-      email ${site.acmeEmail}
-    }
-
-    ${hostName} {
-      reverse_proxy seafile:80
-    }
-  '';
+  # No TLS front on this guest: the public edge (roles/tenant/bunkerweb, CT110) terminates
+  # TLS with the *.us wildcard and proxies to Seafile's own nginx (plain HTTP, port 80)
+  # over the dmz. It is the only client allowed to reach that port (see the firewall).
+  edgeAddress = site.edgeAddress;
+  # Seafile's container port, published on IPv4 loopback for the host relay below.
+  originPort = 8000;
 
   # Containers whose unit must not run before Ansible has installed their env file.
   # A failed condition just skips the unit (not a failure), so the first boot of a fresh
@@ -147,13 +139,30 @@ in
     };
   };
 
-  # 443 serves Seafile; 80 is the ACME challenge + redirect. Docker's published ports
-  # are DNATed in the nat table and bypass this INPUT filter, but the userland proxy
-  # and local clients still arrive here, so open them like matrix does.
-  networking.firewall.allowedTCPPorts = [
-    80
-    443
-  ];
+  # Port 80 is Seafile's plain-HTTP origin, for the edge only. Seafile's own nginx
+  # (baked into the image) listens on IPv4 only, and the edge reaches this guest over
+  # IPv6 — Docker would hand an IPv6 publish to the container's IPv6 address, where
+  # nothing listens. So the container is published on IPv4 loopback only, and a plain
+  # TCP relay on the host (nginx stream, below) bridges [::]:80 to it — the same
+  # IPv6 -> IPv4 shape as frigate's Caddy. Being L4, the relay passes the edge's
+  # X-Forwarded-* headers through untouched. As a normal host listener it is covered by
+  # nixos-fw, which admits port 80 from the edge's ULA only (nixos-fw is rebuilt on
+  # every firewall (re)start, so -A stays idempotent).
+  networking.firewall.extraCommands = ''
+    ip6tables -A nixos-fw -p tcp --dport 80 -s ${edgeAddress} -j nixos-fw-accept
+  '';
+
+  services.nginx = {
+    enable = true;
+    streamConfig = ''
+      server {
+        listen [::]:80;
+        proxy_pass 127.0.0.1:${toString originPort};
+        # Long-lived sync and large file transfers.
+        proxy_timeout 20m;
+      }
+    '';
+  };
 
   # ── Access ────────────────────────────────────────────────────────────────
   # No inbound SSH: Ansible manages this guest through the Proxmox host with
@@ -196,9 +205,10 @@ in
 
   # ── Seafile stack ─────────────────────────────────────────────────────────
   # Follows upstream's docker/ce compose files (.env, seafile-server.yml, caddy.yml)
-  # at the pinned seafile_version; compare them when upgrading. Only seafile-caddy
-  # publishes ports. SeaDoc, the notification server, Seafile AI and the metadata
-  # server are optional upstream extensions and are not deployed.
+  # at the pinned seafile_version; compare them when upgrading. caddy.yml is replaced
+  # by the shared edge (roles/tenant/bunkerweb), so only seafile publishes a port (80).
+  # SeaDoc, the notification server, Seafile AI and the metadata server are optional
+  # upstream extensions and are not deployed.
   virtualisation.oci-containers.containers = {
     ${dbHost} = common // {
       image = site.dbImage;
@@ -268,27 +278,14 @@ in
         REDIS_PASSWORD = "";
       };
       environmentFiles = [ seafileEnvFile ];
+      # IPv4 loopback only; the host relay (services.nginx.streamConfig) serves [::]:80.
+      ports = [ "127.0.0.1:${toString originPort}:80" ];
       extraOptions = [
         "--health-cmd=curl -f http://localhost:80 || exit 1"
         "--health-interval=30s"
         "--health-timeout=10s"
         "--health-retries=3"
         "--health-start-period=60s"
-      ];
-    };
-
-    # Ports are published on the guest's own addresses (NAT66 via the bridge); the
-    # guest's dmz GUA is what ddns publishes. No UDP/443: the IPv4 proxy is TCP-only.
-    seafile-caddy = common // {
-      image = site.caddyImage;
-      dependsOn = [ "seafile" ];
-      ports = [
-        "80:80"
-        "443:443"
-      ];
-      volumes = [
-        "${caddyfile}:/etc/caddy/Caddyfile:ro"
-        "seafile_caddy_data:/data" # certificates; losing it only means re-issuing
       ];
     };
   };
@@ -301,7 +298,7 @@ in
       };
     in
     {
-      # The IPv6-enabled bridge all four containers share. Created once; a changed subnet
+      # The IPv6-enabled bridge all three containers share. Created once; a changed subnet
       # needs the network removed by hand, like any Docker network.
       seafile-docker-network = {
         description = "Docker network ${network.name}";
@@ -333,13 +330,6 @@ in
         serviceConfig.ExecStartPre = lib.mkAfter [
           "${requireMount}/bin/seafile-require-mount ${dataDir}"
           "${waitHealthy}/bin/seafile-wait-healthy ${dbHost}"
-        ];
-      };
-
-      docker-seafile-caddy = onNetwork // {
-        unitConfig = whenSecrets [
-          mysqlEnvFile
-          seafileEnvFile
         ];
       };
 

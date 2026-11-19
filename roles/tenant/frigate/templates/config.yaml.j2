@@ -1,0 +1,85 @@
+{{ ansible_managed | comment }}
+# Frigate config, rendered by roles/tenant/frigate (tasks/frigate.yml) onto the CIFS share as
+# /config/config.yaml. Edits made in Frigate's UI are overwritten on the next run: change
+# this template instead. Credentials (camera stream URLs, MQTT) come from the vault.
+# Amcrest camera setting: turn smart codec off and set frame interval to be equal to FPS
+
+# go2rtc: Camera stream ingress, split to HA and Frigate
+# If two-way audio lock up, go to go2rtc and probe
+go2rtc:
+  streams:
+    cam_indoor:
+      # H.264 + PCMA
+      # Could be natively used by WebRTC albeit at lower audio bitrate (8kHz)
+      # Alternative 1: AAC -> MSE, no two-way audio 
+      # Alternative 2: ffmpeg restream -> CPU load, buggy two way audio
+      - {{ frigate_cam_indoor_stream }}
+    cam_outdoor:
+      # H.264 + PCMA
+      # ffmpeg to reduce visual glitches
+      - {{ frigate_cam_outdoor_stream }}
+  webrtc:
+    candidates:
+{% for candidate in frigate_webrtc_candidates %}
+      - {{ candidate | to_json }}
+{% endfor %}
+
+cameras:
+  cam_indoor:
+    enabled: true
+    ffmpeg:
+      inputs:
+        # Connect to go2rtc restream instead of to the camera directly
+        - path: rtsp://[::1]:8554/cam_indoor
+          input_args: preset-rtsp-restream
+          roles:
+            - record
+    detect:
+      enabled: false # <---- disable detection until you have a working camera feed
+      width: 1280
+      height: 720
+  cam_outdoor:
+    enabled: true
+    ffmpeg:
+      inputs:
+        # Connect to go2rtc restream instead of to the camera directly
+        - path: rtsp://[::1]:8554/cam_outdoor
+          input_args: preset-rtsp-restream
+          roles:
+            - record
+    detect:
+      enabled: false # <---- disable detection until you have a working camera feed
+      width: 1280
+      height: 720
+    # Seems like Frigate doesn't support other functionalities of ONVIF other than PTZ
+    # ONVIF control has to be done from HA instead
+    # 
+    # Unable to get Onvif capabilities for camera: cam_indoor: Unknown error: 
+    # Device doesn`t support service: ptz
+    # 
+    # onvif:
+    #   host: "[fd5a:715f:1edc:a704::19]"
+    #   port: 80
+    #   user: ""
+    #   password: ""
+    #   tls_insecure: true
+
+ffmpeg:
+  hwaccel_args: preset-intel-qsv-h264
+  # qsv is more memory eficient
+
+mqtt:
+  host: {{ frigate_mqtt_host | to_json }}
+  user: {{ frigate_mqtt_user | to_json }}
+  password: {{ frigate_mqtt_password | to_json }}
+
+# This database stayed open, preventing spindown
+database:
+  path: /data/frigate.db
+
+tls:
+  enabled: false
+
+version: 0.18-0
+detect:
+  enabled: true

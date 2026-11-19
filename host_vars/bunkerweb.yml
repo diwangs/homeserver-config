@@ -1,0 +1,35 @@
+---
+# LXC definition, consumed on the Proxmox host by roles/host/proxmox_lxc.
+proxmox_lxc:
+  vmid: 110
+  hostname: bunkerweb
+  # Not a pveam Debian image: a NixOS tarball built from roles/tenant/bunkerweb/files/nixos by
+  # roles/tenant/bunkerweb/tasks/build_template.yml, which runs right before the create task.
+  template: nixos
+  template_role: bunkerweb
+  # ostype=nixos stops Proxmox applying its Debian-style guest fixups.
+  ostype: nixos
+  nixos_path_shim: true
+  # Nix store + two Docker images (~1 GB) + the scheduler's SQLite DB and certificates.
+  disk: local-lvm:16
+  cores: 2
+  # nginx + ModSecurity/CRS and the Python scheduler; the headroom is for
+  # nixos-rebuild evaluation.
+  memory: 2048
+  swap: 1024
+  netif:
+    # dmz (VLAN 6). The single public HTTP(S) edge: the *.us hostnames are CNAMEs to
+    # edge_hostname, whose AAAA is this guest's GUA (prydwen ddns) and whose A is the
+    # router's wan4, reaching this IPv6-only guest through the router's Jool NAT64 (static
+    # mappings, prydwen_jool_inbound). Reaches the origins over plain HTTP on their dmz ULAs.
+    # ip6=manual: addressing is owned by systemd-networkd, declared in
+    # files/nixos/configuration.nix (which also pins the DHCPv6 DUID/IAID the router's
+    # reservation matches). hwaddr is pinned so the router's lease (matched on mac as
+    # well as duid) stays valid if the container is ever recreated.
+    net6: "name=eth6,bridge=vmbr1,tag=6,firewall=1,ip6=manual,hwaddr=BC:24:11:B0:0B:6E"
+  unprivileged: true
+  features:
+    - nesting=1 # Required to run docker, and by the Nix daemon's build sandbox
+  # No mounts: all state (config DB, certificates) is regenerable from this repo and
+  # Let's Encrypt, so it stays in a Docker volume on the rootfs.
+  # No networkd_interfaces: eth6 addressing ships inside the NixOS image.

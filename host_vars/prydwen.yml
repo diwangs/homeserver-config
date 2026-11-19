@@ -80,6 +80,16 @@ prydwen_jool:
   reserved_ports: 32768-32999
   translated_ports: 33000-65535
 
+# Inbound IPv4 to the IPv6-only BunkerWeb edge, through Jool's static NAT64 mappings: the
+# router DNATs wan4:<wan_port> to the translator's <translated_port> (redirect_bunkerweb_*
+# below), and Jool turns that into <ipv6>:<port>. The edge's ULA is used rather than its GUA
+# because a static mapping cannot follow a changing prefix. translated_port must be inside
+# translated_ports above.
+prydwen_jool_inbound:
+  - { name: http, wan_port: 80, translated_port: 64080, ipv6: "fd5a:715f:1edc:a706::2b", port: 80 }
+  - { name: https, wan_port: 443, translated_port: 64443, ipv6: "fd5a:715f:1edc:a706::2b", port: 443 }
+  - { name: webrtc, wan_port: 8555, translated_port: 64555, ipv6: "fd5a:715f:1edc:a706::2b", port: 8555 }
+
 # Named defaults and disabled leftovers that conflict with this topology.
 prydwen_uci_absent_options:
   - network.lan
@@ -119,6 +129,39 @@ prydwen_uci_absent_sections:
     type: route6
     find:
       target: 64:ff9a::/96
+  # The blanket WAN->DMZ forwarding. Replaced by per-host rules (rule_bunkerweb,
+  # rule_nextcloud), so only the BunkerWeb edge and Nextcloud are reachable from the
+  # internet. The edge serves the *.us services and relays Frigate's WebRTC media.
+  - config: firewall
+    type: forwarding
+    find:
+      src: wan
+      dest: dmz
+  # The per-name ddns services for the *.us hostnames are gone: those names are CNAMEs to
+  # edge_hostname, which the `edge`/`edge4` services below keep current. A leftover
+  # per-name service would overwrite its CNAME with a stale address.
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ matrix_hostname }}"
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ hermes_hostname }}"
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ seafile_hostname }}"
+  # Frigate's WebRTC media is relayed over TCP by the BunkerWeb edge (port 8555, then go2rtc
+  # on frigate's dmz NIC), so its direct opening and its ddns record go too.
+  - config: ddns
+    type: service
+    find:
+      lookup_host: "{{ frigate_webrtc_hostname }}"
+  - config: firewall
+    type: rule
+    find:
+      name: Allow-Frigate-WebRTC
 
 # Values applied to packaged/generated sections without replacing their defaults.
 prydwen_uci_values:
@@ -655,6 +698,20 @@ prydwen_uci_sections:
       hostid: "2a"
       duid: ["00020000ab1173656166696c006d%73656166"]
       mac: ["BC:24:11:5A:F1:09"]
+  # HTTP(S) edge (CT110, dmz): BunkerWeb terminates TLS for every *.us hostname, reached
+  # directly (edge_hostname's AAAA, and A via the Jool-translated wan4 forward). Assigned, not
+  # discovered, like seafile: the NixOS guest pins this exact DUID/IAID
+  # in its image (roles/tenant/bunkerweb/files/nixos/configuration.nix), and hwaddr is
+  # pinned in host_vars/bunkerweb.yml.
+  - config: dhcp
+    type: host
+    name: host_bunkerweb
+    find: { name: bunkerweb }
+    value:
+      leasetime: 10m
+      hostid: "2b"
+      duid: ["00020000ab1162756e6b6572006e%62756e6b"]
+      mac: ["BC:24:11:B0:0B:6E"]
   - config: dhcp
     type: host
     name: host_vertibird_ap_v6
@@ -755,7 +812,6 @@ prydwen_uci_sections:
   - { config: firewall, type: forwarding, name: forward_internal_backend, find: { src: internal, dest: backend }, value: {}}
   - { config: firewall, type: forwarding, name: forward_internal_iot, find: { src: internal, dest: iot }, value: {}}
   - { config: firewall, type: forwarding, name: forward_backend_iot, find: { src: backend, dest: iot }, value: {}}
-  - { config: firewall, type: forwarding, name: forward_wan_dmz, find: { src: wan, dest: dmz }, value: {}}
   - { config: firewall, type: forwarding, name: forward_dmz_wan, find: { src: dmz, dest: wan }, value: {}}
   - { config: firewall, type: forwarding, name: forward_internal_dmz, find: { src: internal, dest: dmz }, value: {}}
   - { config: firewall, type: forwarding, name: forward_dmz_backend, find: { src: dmz, dest: backend }, value: {}}
@@ -794,19 +850,93 @@ prydwen_uci_sections:
     name: rule_vertibird
     find: { name: Allow-Vertibird }
     value: { proto: [tcp], src: nat64, dest: infra, dest_port: "80 443 8088 8006", target: ACCEPT }
+  # WAN -> DMZ is closed by default (no wan->dmz forwarding); each public host is
+  # opened here by its stable interface identifier. "::xx/-56" matches that suffix under
+  # whatever /56 the ISP currently delegates (the 6 is the dmz's ip6hint).
+  # The BunkerWeb edge, directly reachable: 80/443 for the *.us sites, 8555 for Frigate's
+  # WebRTC media (TCP relay on the edge). IPv4 arrives through the Jool-bound DNATs below.
   - config: firewall
     type: rule
-    name: rule_frigate_webrtc
-    find: { name: Allow-Frigate-WebRTC }
+    name: rule_bunkerweb
+    find: { name: Allow-BunkerWeb }
     value:
+      proto: [tcp]
       src: wan
-      src_port: "8555"
-      dest: backend
-      dest_port: "8555"
+      dest: dmz
+      dest_port: "80 443 8555"
       target: ACCEPT
       family: ipv6
-      dest_ip: ["0:0:0:3::22/-56"]
-      proto: [tcp, udp]
+      dest_ip: ["0:0:0:6::2b/-56"]
+  # The IPv6 half of that path: Jool (nat64 zone) opens the translated connection to the edge's
+  # ULA, and there is deliberately no zone-wide nat64 -> dmz forwarding, so allow exactly these
+  # ports to exactly that host (replies ride the existing dmz -> nat64 forwarding).
+  - config: firewall
+    type: rule
+    name: rule_bunkerweb_nat64
+    find: { name: Allow-NAT64-BunkerWeb }
+    value:
+      proto: [tcp]
+      src: nat64
+      dest: dmz
+      dest_port: "80 443 8555"
+      dest_ip: ["fd5a:715f:1edc:a706::2b"]
+      target: ACCEPT
+      family: ipv6
+  # IPv4 reaches the IPv6-only edge through Jool (prydwen_jool_inbound): DNAT to the translator's
+  # static NAT64 mappings, which turn the connection into one to the edge's ULA. Clients appear
+  # at the edge as 64:ff9b::<their IPv4>.
+  - config: firewall
+    type: redirect
+    name: redirect_bunkerweb_http
+    find: { name: DNAT-BunkerWeb-http }
+    value:
+      proto: [tcp]
+      src: wan
+      src_dport: "80"
+      dest: nat64
+      dest_ip: 192.168.64.2
+      dest_port: "64080"
+      target: DNAT
+      family: ipv4
+  - config: firewall
+    type: redirect
+    name: redirect_bunkerweb_https
+    find: { name: DNAT-BunkerWeb-https }
+    value:
+      proto: [tcp]
+      src: wan
+      src_dport: "443"
+      dest: nat64
+      dest_ip: 192.168.64.2
+      dest_port: "64443"
+      target: DNAT
+      family: ipv4
+  - config: firewall
+    type: redirect
+    name: redirect_bunkerweb_webrtc
+    find: { name: DNAT-BunkerWeb-webrtc }
+    value:
+      proto: [tcp]
+      src: wan
+      src_dport: "8555"
+      dest: nat64
+      dest_ip: 192.168.64.2
+      dest_port: "64555"
+      target: DNAT
+      family: ipv4
+  # Exception: Nextcloud AIO terminates its own TLS (not behind the edge).
+  - config: firewall
+    type: rule
+    name: rule_nextcloud
+    find: { name: Allow-Nextcloud }
+    value:
+      proto: [tcp]
+      src: wan
+      dest: dmz
+      dest_port: "80 443"
+      target: ACCEPT
+      family: ipv6
+      dest_ip: ["0:0:0:6::23/-56"]
   - config: firewall
     type: rule
     name: rule_hass
@@ -890,16 +1020,20 @@ prydwen_uci_sections:
       check_unit: minutes
       force_unit: minutes
       retry_unit: seconds
+  # The BunkerWeb edge's public name (edge_hostname); matrix.us, hermes.us, seafile.us and
+  # frigate-webrtc.us are CNAMEs to it. AAAA from the edge's dmz lease (pinned, host_bunkerweb),
+  # A from the router's own WAN address (the Jool-bound DNATs). Both records must already exist in
+  # Cloudflare: ddns updates, it does not create.
   - config: ddns
     type: service
-    name: frigate_webrtc
-    find: { lookup_host: "{{ frigate_webrtc_hostname }}" }
+    name: edge
+    find: { lookup_host: "{{ edge_hostname }}", use_ipv6: "1" }
     secret: true
     value:
       service_name: cloudflare.com-v4
       use_ipv6: "1"
       enabled: "1"
-      domain: "frigate-webrtc.us@{{ public_domain }}"
+      domain: "edge.us@{{ public_domain }}"
       username: Bearer
       password: "{{ prydwen_cloudflare_api_token }}"
       use_https: "1"
@@ -907,34 +1041,7 @@ prydwen_uci_sections:
       ip_source: script
       ip_script: >-
         /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='frigate-dmz']['ipv6-addr'][0]['address']\""
-      interface: wan
-      use_syslog: "2"
-  # Publishes the matrix LXC's current dmz GUA as matrix_hostname. AAAA
-  # only — federation is IPv6-only by decision (see roles/tenant/matrix/README.md), so
-  # unlike nextcloud there is no extern/ Fly.io IPv4 shim in front of it. The
-  # server_name is matrix_server_name (a separate zone, delegated here via a Cloudflare
-  # Redirect Rule on its apex); this is only where it is hosted.
-  # The lease for `matrix` is pinned in the same file (host_matrix above), so the
-  # ip_script resolves as soon as the container first boots.
-  - config: ddns
-    type: service
-    name: matrix
-    find: { lookup_host: "{{ matrix_hostname }}" }
-    secret: true
-    value:
-      service_name: cloudflare.com-v4
-      use_ipv6: "1"
-      enabled: "1"
-      domain: "matrix.us@{{ public_domain }}"
-      username: Bearer
-      password: "{{ prydwen_cloudflare_api_token }}"
-      use_https: "1"
-      cacert: /etc/ssl/certs
-      ip_source: script
-      ip_script: >-
-        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='matrix']['ipv6-addr'][0]['address']\""
+        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='bunkerweb']['ipv6-addr'][0]['address']\""
       interface: wan
       use_syslog: "2"
       check_unit: minutes
@@ -942,48 +1049,21 @@ prydwen_uci_sections:
       retry_unit: seconds
   - config: ddns
     type: service
-    name: hermes
-    find: { lookup_host: "{{ hermes_hostname }}" }
+    name: edge4
+    find: { lookup_host: "{{ edge_hostname }}", use_ipv6: "0" }
     secret: true
     value:
       service_name: cloudflare.com-v4
-      use_ipv6: "1"
+      use_ipv6: "0"
       enabled: "1"
-      domain: "hermes.us@{{ public_domain }}"
+      domain: "edge.us@{{ public_domain }}"
       username: Bearer
       password: "{{ prydwen_cloudflare_api_token }}"
       use_https: "1"
       cacert: /etc/ssl/certs
-      ip_source: script
-      ip_script: >-
-        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='hermes-gateway']['ipv6-addr'][0]['address']\""
-      interface: wan
-      use_syslog: "2"
-      check_unit: minutes
-      force_unit: minutes
-      retry_unit: seconds
-  # Publishes the seafile LXC's current dmz GUA as seafile_hostname (AAAA). IPv4
-  # clients reach it through the shared extern/ipv4-proxy Fly app (A record, manual).
-  - config: ddns
-    type: service
-    name: seafile
-    find: { lookup_host: "{{ seafile_hostname }}" }
-    secret: true
-    value:
-      service_name: cloudflare.com-v4
-      use_ipv6: "1"
-      enabled: "1"
-      domain: "seafile.us@{{ public_domain }}"
-      username: Bearer
-      password: "{{ prydwen_cloudflare_api_token }}"
-      use_https: "1"
-      cacert: /etc/ssl/certs
-      ip_source: script
-      ip_script: >-
-        /bin/sh -c "ubus call dhcp ipv6leases | jsonfilter -e
-        \"@['device']['{{ prydwen_dmz_device }}']['leases'][@.hostname='seafile']['ipv6-addr'][0]['address']\""
-      interface: wan
+      ip_source: network
+      ip_network: wan4
+      interface: wan4
       use_syslog: "2"
       check_unit: minutes
       force_unit: minutes

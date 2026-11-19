@@ -13,8 +13,8 @@ Seafile Community Edition on LXC 109, in the dmz (VLAN 6), publicly reachable at
 |---|---|
 | vmid / hostname | 109 / `seafile` (unprivileged, `nesting=1`) |
 | Address | `fd5a:715f:1edc:a706::2a` (dmz, DHCPv6 reservation) |
-| Public name | `seafile.us.example.org` — AAAA via router ddns, A via the Fly IPv4 proxy |
-| Ports | 443 (HTTPS), 80 (ACME + redirect) |
+| Public name | `seafile.us.example.org` — a CNAME to the BunkerWeb edge (CT110, `roles/tenant/bunkerweb`) |
+| Ports | 80 (plain-HTTP origin, reachable from the edge only); TLS is terminated by the edge |
 | Guest OS | NixOS (like `matrix`); the application runs as Docker containers declared with `virtualisation.oci-containers` |
 
 ## This guest is NixOS
@@ -38,7 +38,7 @@ It follows the `matrix` tenant's architecture (see `roles/tenant/matrix/README.m
   `nixos_path_shim` makes `pct exec` find `nixos-rebuild`.
 
 `site.nix` (gitignored, rendered from `templates/site.nix.j2` into both the build directory and
-`/etc/nixos`) carries only the public hostname, the ACME contact and the image pins. **It holds no
+`/etc/nixos`) carries only the public hostname, the edge's address and the image pins. **It holds no
 secret**: anything a Nix expression sees ends up in the world-readable `/nix/store` and in the image.
 
 ### nixpkgs pinning
@@ -54,21 +54,20 @@ ansible-playbook playbooks/configure.yml --limit seafile
 
 ## Stack
 
-Follows upstream's `docker/ce` compose files (`.env`, `seafile-server.yml`, `caddy.yml`) at the
-pinned version, as `virtualisation.oci-containers` (Docker backend) units on the `seafile-net`
+Follows upstream's `docker/ce` compose files (`.env`, `seafile-server.yml`; `caddy.yml` is
+replaced by the shared edge) at the pinned version, as `virtualisation.oci-containers` (Docker backend) units on the `seafile-net`
 bridge (IPv6 subnet `fd00:5ea4:11::/64`, created by `seafile-docker-network.service`):
 
 | Container / unit | Image | Notes |
 |---|---|---|
 | `seafile-mysql` / `docker-seafile-mysql` | `mariadb:10.11` | Seafile 13.0's documented DB; named volume `seafile_db` on the Optane rootfs; Docker healthcheck |
 | `seafile-redis` / `docker-seafile-redis` | `redis:7` | Cache (`CACHE_PROVIDER=redis`, the 13.0 default); no password, no published port, no persistence — same as upstream |
-| `seafile` / `docker-seafile` | `seafileltd/seafile-mc:<seafile_version>` | Seahub + Go fileserver; `/shared` = ZFS (`/mnt/seafile`) |
-| `seafile-caddy` / `docker-seafile-caddy` | `caddy:2` | TLS termination, the only container with published ports (80, 443) |
+| `seafile` / `docker-seafile` | `seafileltd/seafile-mc:<seafile_version>` | Seahub + Go fileserver; `/shared` = ZFS (`/mnt/seafile`); the only container with a published port (80, the origin for the edge) |
 
 Dependencies and health, which compose expresses with `depends_on: service_healthy` and systemd
 orders only by "started": `docker-seafile` `Requires=` the database, cache and network units, and its
 `ExecStartPre` runs `seafile-wait-healthy seafile-mysql` (up to 10 minutes) after the mount guard.
-`docker-seafile-caddy` requires `docker-seafile`. Containers restart on failure (systemd
+Containers restart on failure (systemd
 `Restart=on-failure`, the old `unless-stopped`); `docker logs <name>` works as before.
 
 Guards:
@@ -83,17 +82,15 @@ Guards:
 
 Deliberate deviations from upstream:
 
-- **Caddy**: stock `caddy` with a static Caddyfile (generated in Nix from the hostname and ACME
-  contact) instead of `caddy-docker-proxy`, so the internet-facing container does not get
-  `/var/run/docker.sock` (root on the guest).
+- **No TLS front here**: upstream's `caddy-docker-proxy` (which would hold `/var/run/docker.sock`)
+  is replaced by the shared BunkerWeb edge (`roles/tenant/bunkerweb`), which terminates TLS with
+  the `*.us` wildcard and proxies to Seafile's own nginx on port 80.
 - **Not deployed**: SeaDoc, notification server, Seafile AI, metadata server (upstream
   optional extensions). `ENABLE_SEADOC` is set to `false` explicitly (upstream defaults it
   to `true`). Add them from upstream's `seadoc.yml` etc. if wanted.
 - **No Portainer**, unlike the other Docker tenants, to keep the public guest's admin surface minimal.
-- **Client IPs**: Caddy's default `X-Forwarded-For` handling records the connecting peer, so direct
-  clients keep their address as far as Caddy reports it to Seafile. Clients arriving through the IPv4 proxy
-  are the exception: Fly hides the IPv4 source, so they appear as the proxy and Seafile's login
-  throttling is per-proxy for them, not per-client.
+- **Client IPs**: the edge sees each client's real address (Docker's DNAT keeps it) and passes it on
+  in `X-Forwarded-For`, so Seafile's login throttling stays per-client for IPv4 and IPv6 alike.
 - The dmz ipvlan network `docker_host` used to require is gone (nothing joined it).
 
 ## Secrets (operator action required)
@@ -128,9 +125,13 @@ live database or admin account; change those in the app / MariaDB. Rotating
 
 ## Network and exposure
 
-- **Router** (`host_vars/prydwen.yml`): `host_seafile` DHCPv6 reservation (hostid `2a`) and a
-  `seafile` ddns service publishing the guest's dmz GUA as AAAA. No firewall rule: the dmz zone
-  is already forwarded from wan (`forward_wan_dmz`), as for matrix/nextcloud.
+- **Router** (`host_vars/prydwen.yml`): `host_seafile` DHCPv6 reservation (hostid `2a`). No
+  ddns: `seafile.us.example.org` is a CNAME to `edge.us.example.org` (the edge's ddns). Nothing
+  is forwarded from wan to this guest; only the edge is reachable.
+- **Origin port**: Seafile's own nginx (baked into the image) listens on IPv4 only, so `seafile` is
+  published on `127.0.0.1:8000`, and a TCP relay on the host (`services.nginx.streamConfig`) serves
+  `[::]:80` to the (IPv6) edge, the same IPv6 → IPv4 shape as frigate's Caddy. `nixos-fw` admits
+  port 80 only from the edge's ULA (`site.edgeAddress`).
 - **Pinned DHCPv6 identity.** As for matrix, the lease is *assigned*, not discovered, so it can be written
   before the container first boots (no manual lease step any more). `configuration.nix` sets for
   `eth6`:
@@ -148,14 +149,11 @@ live database or admin account; change those in the app / MariaDB. Rotating
   `duid: ["00020000ab1173656166696c006d%73656166"]`, and `tests/test_seafile_wiring.py` fails if the two
   ever disagree. The `mac` is pinned too (`hwaddr` in `host_vars/seafile.yml`). Addressing is
   systemd-networkd's, declared in the image (`10-eth6`); there is no `networkd_interfaces` pct-exec step.
-- **IPv4**: shared Fly proxy, `extern/ipv4-proxy/nginx.conf.example` routes SNI
-  `seafile.us.example.org` to the origin on 443 (TLS passthrough) and 80 (ACME challenge /
-  redirect). Copy it into the gitignored `nginx.conf` and `fly deploy` (see that README). Adding
-  a hostname to the shared Fly app means an outage there now also takes down Seafile's IPv4.
-- **TLS**: Caddy gets a Let's Encrypt certificate itself (`acme_email`). It needs inbound 443
-  (and ideally 80) and a resolving AAAA. State lives in the `seafile_caddy_data` volume
-  — losing it only means re-issuing. Docker publishes 80/443 on the guest's own addresses (NAT66
-  through the bridge, `ip6tables` in the daemon settings); the NixOS firewall also allows both.
+- **Ingress**: the BunkerWeb edge, directly: IPv6 to its GUA, IPv4 by the router's wan4 address through
+  its Jool NAT64. The edge redirects 80 to https.
+- **TLS**: terminated by the edge with the `*.us` wildcard (DNS-01); see
+  `roles/tenant/bunkerweb/README.md`. Upload limits, timeouts and the ModSecurity exemption for
+  `/seafhttp` are set there.
 
 ## Storage and backup
 
@@ -178,7 +176,7 @@ every earlier dump untouched. **Scope decision, as for Immich: no off-pool copy.
 The dump and `/shared` share one RAID-Z pool; add a borg/rsync job if that is not enough.
 
 Consistent restore (per Seafile's backup docs the DB is dumped *before* data is copied, so
-the DB never references blocks the data copy lacks): stop `docker-seafile` and `docker-seafile-caddy`,
+the DB never references blocks the data copy lacks): stop `docker-seafile`,
 restore the data dir to `/mnt/seafile`, load the dump into `seafile-mysql` (see "Restore the database"
 below), start the containers. Test a restore before
 relying on it.
@@ -186,26 +184,25 @@ relying on it.
 ## First run (new guest, no existing data)
 
 1. Add the five vault entries above. Review `seafile_version` against the upstream release notes.
-2. `ansible-playbook playbooks/configure.yml --limit prydwen` installs the DHCPv6 reservation and the ddns
-   service. Do this first so the address is waiting before CT109 boots.
+2. `ansible-playbook playbooks/configure.yml --limit prydwen` installs the DHCPv6 reservation. Do this
+   first so the address is waiting before CT109 boots.
 3. `ansible-playbook playbooks/init_proxmox.yml --limit sentinel-lp` builds the NixOS template on the
    workstation (needs Nix there), uploads it and creates CT109 with both mounts present at first boot.
    Do not create dirs by hand under the host paths.
 4. `ansible seafile -m ping`, then `ansible-playbook playbooks/configure.yml --limit seafile`. (There is no
    `init_tenant.yml` stage for this guest.) The first run pulls the images and Seafile initialises,
    which takes a minute or two.
-5. **Create the `AAAA` record** for `seafile.us.example.org` in Cloudflare (DNS-only, grey cloud,
-   placeholder address): ddns updates an existing record but does not create it. Add the
-   DNS-only `A` record pointing at the Fly app's IPv4 (same one nextcloud/matrix use) and
-   redeploy the Fly proxy with the new map entries.
-6. Wait for Caddy to obtain the certificate (`docker logs seafile-caddy`), then sign in at
+5. **Create `seafile.us.example.org` in Cloudflare** as a CNAME to `edge.us.example.org` (DNS-only);
+   see `roles/tenant/bunkerweb/README.md`.
+6. Make sure the edge is up (`roles/tenant/bunkerweb`, `docker logs bunkerweb-scheduler` shows the
+   wildcard), then sign in at
    `https://seafile.us.example.org` as `vault_seafile_admin_email`.
 7. Confirm the first dump: `systemctl start seafile-db-dump` and check `/mnt/seafile-backup`.
 8. In the admin UI, disable public registration and review upload limits before inviting users.
 
 ## Restoring from backup
 
-To restore into a freshly created guest, stop the stack first so Seafile cannot write while data and database are swapped (`systemctl stop docker-seafile-caddy docker-seafile`), restore the data dir to `/mnt/seafile` and load the dump (below), then start the stack again (`systemctl start docker-seafile docker-seafile-caddy`, or re-run `playbooks/configure.yml --limit seafile`).
+To restore into a freshly created guest, stop the stack first so Seafile cannot write while data and database are swapped (`systemctl stop docker-seafile`), restore the data dir to `/mnt/seafile` and load the dump (below), then start the stack again (`systemctl start docker-seafile`, or re-run `playbooks/configure.yml --limit seafile`).
 
 ### Restore the database
 

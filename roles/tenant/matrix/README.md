@@ -12,9 +12,9 @@ succeeded conduwuit, via the `services.matrix-tuwunel` nixpkgs module.
 |---|---|
 | vmid / hostname | 106 / `matrix` |
 | Address | `fd5a:715f:1edc:a706::27` (dmz) |
-| Public name | `matrix.us.example.org` (AAAA only) — where it is *hosted* |
+| Public name | `matrix.us.example.org` — where it is *hosted*; served by the BunkerWeb edge (CT110, `roles/tenant/bunkerweb`) |
 | `server_name` | `example.com` — its *identity*; user IDs read `@you:example.com` |
-| Ports | 443 client + federation, 8448 federation, 80 ACME + redirect |
+| Ports | 80 (plain-HTTP origin, reachable from the edge only); client + federation on the edge's 443 |
 
 ## This guest is not Debian
 
@@ -88,95 +88,58 @@ Backups are **not** a directly usable database directory. To restore, stop the
 service and run `tuwunel --restore-backup` (or `--restore-backup=N` for a specific
 one); `server list-backups` shows what is there.
 
-## IPv4 reachability
+## Public reachability
 
-The container itself is still IPv6-only — `matrix.us.example.org`'s `AAAA` is the
-only address it ever holds. IPv4 clients and homeservers reach it through
-**`extern/ipv4-proxy/`**, the same Fly.io TCP-passthrough shim Nextcloud uses,
-*shared* rather than duplicated: one Fly app now fronts both tenants, routed by TLS
-SNI (`ssl_preread`, no certificate termination at the proxy — the real backend still
-negotiates TLS end-to-end with the client). See that directory's `nginx.conf` for
-the routing map.
+`matrix.us.example.org` is a CNAME to `edge.us.example.org`, the BunkerWeb edge, not this
+guest. IPv6 clients reach the edge's GUA; IPv4 clients reach the router's wan4 address, which
+is translated to the edge by the router's Jool NAT64. The edge terminates TLS and proxies here, and sees every
+client's real address on both families.
 
-This tenant added a second Fly `[[services]]` block for **port 8448** (federation)
-alongside the existing 443 one, since Nextcloud only ever needed 443.
+Port **8448** is retired: the delegation (`.well-known/matrix/server`, here and at the
+apex) already points federation at `:443`, so the fallback port carried nothing a
+compliant server needs.
 
-**Manual, one-time DNS step** (same category as the DHCPv6 lease and the apex
-`.well-known` — outside what Ansible reaches): add an `A` record for
-`matrix.us.example.org` in Cloudflare, pointed at the **same IPv4** Nextcloud's
-`A` record already uses, and **DNS-only** (grey cloud) — proxying it through
-Cloudflare would terminate TLS at the edge, which this passthrough setup deliberately
-avoids. The existing `AAAA` (ddns-managed, direct to the container) is untouched;
-this is purely additive, matching Nextcloud's dual-stack split exactly: IPv6 clients
-go straight to the box, IPv4 clients go via Fly.
+**The trade-off worth knowing**: all public reachability depends on the single edge guest
+(CT110); if it is down, Matrix, hermes and seafile are offline together.
 
-**The trade-off worth knowing**: reachability for *both* tenants now depends on one
-shared Fly app. An outage there — the app crashing, its region going down, the
-dedicated IPv4 being reassigned — takes down IPv4 access to Nextcloud and Matrix
-together, where before it was Nextcloud's problem alone. Nothing about the
-container's own health or the DMZ firewall changes; this risk is entirely in the
-external proxy layer, and is the direct cost of not running (and paying for) a
-second dedicated IPv4 and machine.
-
-Once the `A` record exists and `fly deploy` has picked up the new `nginx.conf` /
-`fly.toml`, verify with
+Verify with
 [federationtester](https://federationtester.matrix.org/api/report?server_name=example.com)
-— it should now report a *successful* connection over IPv4, not merely IPv6.
+— it should report a successful connection over both IPv4 and IPv6.
 
 ## TLS
 
-nginx terminates TLS and proxies `/_matrix/` to tuwunel on `[::1]:6167`. Matrix
-requires a real certificate — federation and clients both reject plain HTTP, and a
-self-signed cert will not federate.
+TLS is terminated by the **BunkerWeb edge** (`roles/tenant/bunkerweb`, CT110) with the
+`*.us.example.org` wildcard, issued over Cloudflare DNS-01. Matrix requires a real
+certificate — federation and clients both reject plain HTTP — and that is what the
+edge presents for `matrix.us.example.org`.
 
-The certificate is issued over **ACME HTTP-01**, which is why this role needs no
-credential of any kind. Let's Encrypt proves ownership by fetching a challenge file
-over port 80, so the only thing it depends on is the `AAAA` record being correct.
-Note the bootstrap ordering that implies: ddns keeps that record *current* but does
-not *create* it, so until the record exists in Cloudflare (checklist step 6) nothing
-resolves and ACME cannot validate — nginx serves the self-signed placeholder
-`security.acme` installs so it can start at all. DNS-01 was the obvious alternative, but
-it proves the same fact by writing a `_acme-challenge` `TXT` record, which would mean
-a Cloudflare token with `Zone:DNS:Edit` sitting on a public-facing host to solve a
-problem ddns has already solved.
+This guest has no certificate, no `security.acme` and no `:443`/`:8448` listener any
+more. nginx listens on plain HTTP `[::]:80` and proxies `/_matrix/` to tuwunel on
+`[::1]:6167`, serving both `.well-known` documents itself. The firewall
+(`networking.firewall.extraCommands`) admits port 80 only from the edge's ULA
+(`site.edgeAddress`); nothing else on the guest is reachable.
 
-What this trades away: **renewal now depends on inbound port 80.** Verified open end
-to end at both layers —
-
-- Router: `forward_wan_dmz` is an unrestricted forwarding (no `dest_port` filter), and
-  no rule narrows it. Contrast `rule_hass`, which needs an explicit `dest_port: '80
-  443'` because the backend zone has no forwarding entry at all.
-- Proxmox: the `firewall=1` on the netif is inert — there is no `cluster.fw` and
-  `nodes/sentinel-lp/host.fw` has `enable: 0`, so the PVE firewall is off node-wide.
-
-**Confirmed working in practice**, not just on paper: lego completed an HTTP-01
-order against `acme-v02.api.letsencrypt.org` and issued a real certificate, which
-only succeeds if Let's Encrypt can reach port 80 from the internet. So the ISP does
-deliver inbound 80. If a renewal ever fails with a connection timeout on the
-challenge, that is the thing to suspect, and the fix is to move this cert to DNS-01.
+hermes-gateway's Matrix client uses the public name like any other client, through
+the edge, so it also gets the real certificate.
 
 ## First-run checklist
 
-This role needs **no vault entry** — see "TLS" below.
+This role needs **no vault entry** — TLS belongs to the edge (see "TLS" below).
 
 There is **no manual DHCPv6 lease step** — see "Pinned DHCPv6 identity" below.
 
-1. `ansible-playbook playbooks/configure.yml --limit prydwen` — installs the static lease and
-   the ddns service. Do this first so the address is reserved before 106 boots.
+1. `ansible-playbook playbooks/configure.yml --limit prydwen` — installs the static lease.
+   Do this first so the address is reserved before 106 boots.
 2. `ansible-playbook playbooks/init_proxmox.yml` — builds the template, creates and starts 106.
 3. Confirm reachability: `ansible matrix -m ping`.
 4. `ansible-playbook playbooks/configure.yml --limit sentinel-lp,matrix`.
 5. **`pct reboot 106` once.** `mp0` is added while the container is already running,
    so the backup mount is not visible until a restart — the same one-time step
    Immich needs. Verify with `pct exec 106 -- findmnt /mnt/matrix-backup`.
-6. **Create the `AAAA` record for `matrix.us.example.org` in Cloudflare**, with any
-   placeholder address. This cannot be skipped and cannot be automated from here:
-   ddns-scripts' `cloudflare.com-v4` provider *updates* an existing record, it does
-   not create one. Until the record exists it logs
-   `Could not detect 'record id' for host.domain.tld` and never publishes, and
-   because nothing resolves, ACME cannot validate either — nginx keeps serving the
-   self-signed placeholder cert that `security.acme` installs so it can start.
-   Once the record exists, ddns keeps it pointed at the current dmz GUA.
+6. **Create `matrix.us.example.org` in Cloudflare** as a CNAME to `edge.us.example.org`
+   (DNS-only); the router's ddns keeps the edge's own records current. The certificate does
+   not depend on it: the edge's wildcard is issued over DNS-01. See
+   `roles/tenant/bunkerweb/README.md`.
 7. **`.well-known` at the apex** — see below.
 8. Create the admin user. Tuwunel runs admin commands at startup via `--execute` /
    `admin_execute`; `allow_registration` is off, so this is the only way in.
@@ -203,8 +166,7 @@ Two prerequisites the rule depends on, both manual and both already done:
    documents `100::` (AAAA) / `192.0.2.0` (A) as reserved addresses for exactly this
    originless case; traffic never reaches them because the proxy answers first.
 2. `matrix.us.example.org` stays **grey** (DNS-only, direct). Proxying it would
-   terminate TLS at Cloudflare, and — more concretely — federation's port 8448 isn't
-   in Cloudflare's proxied port list, so the fallback listener would go dark.
+   terminate TLS at Cloudflare, in front of the edge that already does.
 
 nginx also serves both documents directly on `matrix.us.example.org` for clients
 handed that host, but that does not substitute for the apex — federation and most
@@ -266,7 +228,6 @@ so the guest addresses itself on first boot with no host-side `pct exec`. The `1
 prefix sorts ahead of anything Proxmox drops into `/etc/systemd/network`, and
 networkd takes the first matching file.
 
-No firewall rule is needed on the router. The dmz zone is already forwarded from
-wan (`forward_wan_dmz` in `host_vars/prydwen.yml`), which is the reason for putting
-a public service on VLAN 6 rather than backend, where each service needs its own
-prefix-relative `dest_ip` rule.
+The router forwards nothing from wan to this guest: wan → dmz is closed except for
+the documented exceptions (`host_vars/prydwen.yml`). Public traffic arrives only via
+the edge, which reaches this guest on its dmz ULA.

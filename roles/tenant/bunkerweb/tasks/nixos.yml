@@ -1,0 +1,43 @@
+---
+- name: Ensure the NixOS configuration directory exists
+  ansible.builtin.file:
+    path: /etc/nixos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the NixOS flake tree
+  ansible.builtin.copy:
+    src: nixos/
+    dest: /etc/nixos/
+    owner: root
+    group: root
+    mode: "0644"
+
+# site.nix carries the public identity and image pins (no secrets); it is not
+# committed, so it is rendered beside the static tree.
+- name: Render the public identity module
+  ansible.builtin.template:
+    src: site.nix.j2
+    dest: /etc/nixos/site.nix
+    owner: root
+    group: root
+    mode: "0644"
+
+# nixos-rebuild always re-runs the activation script, so its exit status says
+# nothing about whether anything moved. Compare the system closure either side
+# instead, which is the only honest signal.
+# --no-update-lock-file: the committed flake.lock is the pin; without this a
+# rebuild could quietly pull a different nixpkgs than the image was built from.
+- name: Apply the NixOS configuration
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      before=$(readlink -f /run/current-system)
+      nixos-rebuild switch --flake /etc/nixos#bunkerweb --no-update-lock-file
+      after=$(readlink -f /run/current-system)
+      [ "$before" = "$after" ] || echo CHANGED
+    executable: /bin/sh
+  register: bunkerweb_rebuild
+  changed_when: "'CHANGED' in bunkerweb_rebuild.stdout"

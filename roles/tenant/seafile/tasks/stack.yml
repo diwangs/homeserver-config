@@ -5,7 +5,7 @@
 # (as the old docker_container tasks did). Only units whose credentials changed on an
 # existing guest are restarted: on the first run the stack is brand new, and bouncing
 # Seafile in the middle of its first initialisation could leave /shared half-written.
-# Restarting MariaDB also restarts seafile and seafile-caddy (they Require it).
+# Restarting MariaDB also restarts seafile (it Requires it).
 
 # mp0 only exists if the LXC was created with it; without the mount, Docker would
 # silently create the bind source on the rootfs and the library would land there. The
@@ -42,7 +42,5 @@
       restart: >-
         {{ (seafile_server_env is changed and seafile_server_env_before.stat.exists)
         or (seafile_mysql_env is changed and seafile_mysql_env_before.stat.exists) }}
-    - unit: docker-seafile-caddy.service
-      restart: false
   loop_control:
     label: "{{ item.unit }}"
