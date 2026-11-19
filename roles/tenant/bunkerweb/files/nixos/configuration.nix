@@ -43,6 +43,117 @@ let
   };
   apiWhitelist = "127.0.0.0/8 ${network.subnet4} ${network.subnet6}";
 
+  # Home Assistant's Permissions-Policy. BunkerWeb's default (bunkerweb_version 1.6.17) denies
+  # every feature with `=()`, and Chromium (desktop Chrome, the companion app's Android
+  # WebView) enforces it: with autoplay denied, Advanced Camera Card's go2rtc player never
+  # starts its <video> (a grey placeholder; media-playback-while-not-visible denied also
+  # leaves every play() pending in the top-level page), and with microphone denied there is no
+  # two-way audio. Firefox ignores most of the header, so it looked fine there. The deny
+  # list is upstream's default minus what the frontend needs, which is allowed for the
+  # origin itself only. Re-check against the default when bumping bunkerweb_version.
+  hassPermissionsPolicy =
+    let
+      allowSelf = [
+        "autoplay"
+        "fullscreen"
+        "media-playback-while-not-visible"
+        "microphone"
+        "picture-in-picture"
+      ];
+      deny = [
+        "accelerometer"
+        "ambient-light-sensor"
+        "aria-notify"
+        "attribution-reporting"
+        "bluetooth"
+        "browsing-topics"
+        "camera"
+        "captured-surface-control"
+        "ch-device-memory"
+        "ch-downlink"
+        "ch-dpr"
+        "ch-ect"
+        "ch-prefers-color-scheme"
+        "ch-prefers-reduced-motion"
+        "ch-prefers-reduced-transparency"
+        "ch-rtt"
+        "ch-save-data"
+        "ch-ua-arch"
+        "ch-ua-bitness"
+        "ch-ua-form-factors"
+        "ch-ua-full-version-list"
+        "ch-ua-full-version"
+        "ch-ua-high-entropy-values"
+        "ch-ua-mobile"
+        "ch-ua-model"
+        "ch-ua-platform-version"
+        "ch-ua-platform"
+        "ch-ua-wow64"
+        "ch-ua"
+        "ch-viewport-height"
+        "ch-viewport-width"
+        "ch-width"
+        "compute-pressure"
+        "cross-origin-isolated"
+        "deferred-fetch-minimal"
+        "deferred-fetch"
+        "device-attributes"
+        "digital-credentials-create"
+        "digital-credentials-get"
+        "display-capture"
+        "encrypted-media"
+        "execution-while-not-rendered"
+        "execution-while-out-of-viewport"
+        "focus-without-user-activation"
+        "gamepad"
+        "geolocation"
+        "gyroscope"
+        "haptics"
+        "hid"
+        "identity-credentials-get"
+        "idle-detection"
+        "interest-cohort"
+        "keyboard-map"
+        "language-detector"
+        "language-model"
+        "local-fonts"
+        "local-network-access"
+        "local-network"
+        "loopback-network"
+        "magnetometer"
+        "manual-text"
+        "midi"
+        "on-device-speech-recognition"
+        "otp-credentials"
+        "payment"
+        "private-state-token-issuance"
+        "private-state-token-redemption"
+        "proofreader"
+        "publickey-credentials-create"
+        "publickey-credentials-get"
+        "publickey-credentials-remote-client-data-json"
+        "rewriter"
+        "screen-wake-lock"
+        "serial"
+        "speaker-selection"
+        "storage-access"
+        "summarizer"
+        "tools"
+        "translator"
+        "unbounded-element"
+        "unload"
+        "usb"
+        "vertical-scroll"
+        "web-app-installation"
+        "web-share"
+        "webnn"
+        "window-management"
+        "writer"
+        "xr-spatial-tracking"
+      ];
+    in
+    lib.concatStringsSep ", " (map (f: "${f}=(self)") allowSelf ++ map (f: "${f}=()") deny);
+
   # BunkerWeb's multisite settings are `<server name>_<SETTING>`; this prefixes a whole
   # attrset of per-site settings with its server name.
   perSite = host: lib.mapAttrs' (k: v: lib.nameValuePair "${host}_${k}" v);
@@ -124,12 +235,20 @@ let
     # The frontend and the companion apps live on one websocket (/api/websocket), held
     # open for hours. A cold frontend load fetches ~100 assets at once, hence the higher
     # request rate. Bodies: backup uploads in the UI, camera snapshots, app webhooks.
+    # Its Permissions-Policy lets the camera card autoplay and use the microphone (above).
     ${site.hassHostName} = common // {
       REVERSE_PROXY_HOST = "http://[${site.hassUpstream}]:8123";
+      PERMISSIONS_POLICY = hassPermissionsPolicy;
       REVERSE_PROXY_WS = "yes";
       ALLOWED_METHODS = "GET|POST|HEAD|PUT|PATCH|DELETE|OPTIONS";
       MAX_CLIENT_SIZE = "1g";
       LIMIT_REQ_RATE = "50r/s";
+      # The companion apps' webhooks (sensor updates, location, notifications) burst when
+      # an app flushes its queue after HA or the network was away: ~40 POSTs/s for several
+      # seconds, which the shared 50r/s answered with 429s (updates lost). Their own,
+      # higher limit; each webhook id is an unguessable secret checked by HA itself.
+      LIMIT_REQ_URL_1 = "^/api/webhook/";
+      LIMIT_REQ_RATE_1 = "200r/s";
       REVERSE_PROXY_READ_TIMEOUT = "3600s";
       REVERSE_PROXY_SEND_TIMEOUT = "3600s";
     };

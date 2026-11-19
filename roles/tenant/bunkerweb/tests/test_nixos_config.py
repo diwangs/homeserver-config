@@ -174,6 +174,18 @@ class NixosConfig(unittest.TestCase):
         self.assertIn("MKCALENDAR", e["dav.us.example.org_ALLOWED_METHODS"].split("|"))
         self.assertEqual(e["hass.us.example.org_REVERSE_PROXY_WS"], "yes")
         self.assertEqual(e["hass.us.example.org_REVERSE_PROXY_READ_TIMEOUT"], "3600s")
+        # Chromium enforces Permissions-Policy: the camera card needs autoplay (else a grey
+        # placeholder) and the microphone (two-way audio); the rest stays denied.
+        policy = dict(p.split("=", 1) for p in e["hass.us.example.org_PERMISSIONS_POLICY"].split(", "))
+        for f in ("autoplay", "fullscreen", "media-playback-while-not-visible", "microphone", "picture-in-picture"):
+            self.assertEqual(policy[f], "(self)", f)
+        for f in ("camera", "geolocation", "usb", "payment"):
+            self.assertEqual(policy[f], "()", f)
+        self.assertNotIn("matrix.us.example.org_PERMISSIONS_POLICY", e)
+        # App webhooks burst past the site-wide limit; they get their own.
+        self.assertEqual(e["hass.us.example.org_LIMIT_REQ_RATE"], "50r/s")
+        self.assertEqual(e["hass.us.example.org_LIMIT_REQ_URL_1"], "^/api/webhook/")
+        self.assertEqual(e["hass.us.example.org_LIMIT_REQ_RATE_1"], "200r/s")
         self.assertEqual(e["seafile.us.example.org_MAX_CLIENT_SIZE"], "0")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_URL_1"], "/seafhttp")
         self.assertEqual(e["seafile.us.example.org_REVERSE_PROXY_MODSECURITY_1"], "no")
