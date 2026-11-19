@@ -15,6 +15,8 @@ hdparm_devices:
   - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_D7JEUUGN
     options:
       - "apm = 127"
+      # NOTE: a boot-time SATA link reset on ata1 can silently clear this; hd-idle
+      # covers this disk too (see hd_idle_devices below).
       - "spindown_time = 240" # 20 mins
   - dev: /dev/disk/by-id/ata-WDC_WD120EFBX-68B0EN0_5QK4975B
     options:
@@ -28,13 +30,21 @@ hdparm_devices:
       - "apm = 127"
       - "spindown_time = 240"
 
-# hd-idle targets: disks whose firmware -S timer is broken and need OS-driven spindown
-# via STANDBY IMMEDIATE. Only 5QK4975B — its auto-standby is permanently dead (obeys
-# hdparm -y, ignores -S, survived a cold power cycle on a clean link). The other two
-# disks honor the spindown_time above normally and are left to hd-idle's `-i 0` default.
+# hd-idle targets: disks whose firmware -S timer can't be relied on and need OS-driven
+# spindown via STANDBY IMMEDIATE.
+# - 5QK4975B: its auto-standby is permanently dead (obeys hdparm -y, ignores -S,
+#   survived a cold power cycle on a clean link).
+# - D7JEUUGN (sda/ata1): its port has flaky SATA link errors at boot (interface fatal
+#   error, UnrecovData Handshk -> hard reset, link limited to 3.0 Gbps). The COMRESET
+#   happens after udev applied hdparm.conf and drops the drive's -S timer back to the
+#   power-on default, so it never spins down. hd-idle is immune to that. (The cable or
+#   port should still be checked.)
+# D7J6PRPN honors the spindown_time above normally and is left to hd-idle's `-i 0` default.
 hd_idle_devices:
   - id: ata-WDC_WD120EFBX-68B0EN0_5QK4975B
     idle: 1200 # 20 mins, matches the spindown_time intent for the other disks
+  - id: ata-WDC_WD120EFBX-68B0EN0_D7JEUUGN
+    idle: 1200
 
 # After usbip is installed, run `usbip list -l` to get the busid
 # Serial: Silicon Labs: CP210x UART bridge (careful, it's the same as skyconnect)

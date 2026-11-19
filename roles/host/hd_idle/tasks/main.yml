@@ -1,5 +1,6 @@
 ---
-# Host-level hd-idle setup for sentinel-lp. The 5QK4975B drive's firmware ignores the
+# Host-level hd-idle setup for sentinel-lp (also covers D7JEUUGN, whose -S timer is
+# lost to SATA link resets; see host_vars). The 5QK4975B drive's firmware ignores the
 # ATA standby timer (hdparm -S): it accepts the command but never spins down, even
 # after a cold power cycle on a clean SATA link. It DOES honor STANDBY IMMEDIATE
 # (hdparm -y), which is exactly what hd-idle issues after watching /proc/diskstats go
