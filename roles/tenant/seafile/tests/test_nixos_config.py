@@ -118,7 +118,10 @@ class NixosConfig(unittest.TestCase):
             self.assertIn("seafile-docker-network.service", deps)
 
     def test_storage_semantics_unchanged(self):
-        self.assertEqual(self.containers["seafile"]["volumes"], ["/mnt/seafile:/shared"])
+        self.assertEqual(
+            self.containers["seafile"]["volumes"],
+            ["/mnt/seafile:/shared", "/var/lib/seafile/logs:/shared/seafile/logs"],
+        )
         self.assertEqual(self.containers["seafile-mysql"]["volumes"], ["seafile_db:/var/lib/mysql"])
 
     def test_upstream_environment_preserved(self):

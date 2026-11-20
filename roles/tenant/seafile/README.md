@@ -79,6 +79,8 @@ Guards:
   booted image (before Ansible has run) skips them quietly instead of crash-looping.
 - **Logs** go to stdout (`SEAFILE_LOG_TO_STDOUT`) and Docker's `json-file` driver, rotated at 50 MB × 3
   by the daemon settings (the same values `docker_host` applied), not into `/shared/logs` on the HDDs.
+  The image's nginx ignores that and logs to `/shared/seafile/logs`, so `/var/lib/seafile/logs` on the
+  rootfs is bind-mounted over it; otherwise the 30 s healthcheck's access-log line would wake the HDDs.
 
 Deliberate deviations from upstream:
 

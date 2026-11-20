@@ -18,6 +18,12 @@ let
   dataDir = "/mnt/seafile"; # library blocks, config, avatars (ZFS)
   backupDir = "/mnt/seafile-backup"; # nightly SQL dumps (ZFS)
 
+  # The image's bundled nginx writes its access/error logs to /shared/seafile/logs no
+  # matter what SEAFILE_LOG_TO_STDOUT says, and the 30 s healthcheck below hits it, so
+  # left on /shared that is a ZFS write every 30 s that keeps the HDDs from spinning
+  # down. Bind this guest's (Optane) rootfs over it instead.
+  logDir = "/var/lib/seafile/logs";
+
   # Runtime-only credentials, written by Ansible (tasks/secrets.yml) as root:root 0400
   # from the vault. Passed to `docker run --env-file`, so the values never appear in a
   # unit file, the Nix store, or the image. They are plain strings on purpose: a Nix
@@ -201,6 +207,7 @@ in
   systemd.tmpfiles.rules = [
     "d /var/lib/seafile 0755 root root -"
     "d ${secretsDir} 0700 root root -"
+    "d ${logDir} 0755 root root -"
   ];
 
   # ── Seafile stack ─────────────────────────────────────────────────────────
@@ -251,7 +258,10 @@ in
         dbHost
         redisHost
       ];
-      volumes = [ "${dataDir}:/shared" ]; # library blocks, config, avatars on ZFS (mp0)
+      volumes = [
+        "${dataDir}:/shared" # library blocks, config, avatars on ZFS (mp0)
+        "${logDir}:/shared/seafile/logs" # nginx logs on the rootfs, see logDir
+      ];
       environment = {
         SEAFILE_MYSQL_DB_HOST = dbHost;
         SEAFILE_MYSQL_DB_PORT = "3306";

@@ -38,7 +38,11 @@ proxmox_lxc:
     - path: /mnt/frontpanel-pool/frontpanel-dataset/Seafile
       owner: "100000"
       group: "100000"
-      mode: "0750"
+      # o+x (traverse, no listing): this is the container's /shared, and the image's
+      # nginx workers (www-data) reopen /shared/seafile/logs/* themselves after the
+      # nightly logrotate USR1. With 0750 that reopen fails silently and they keep
+      # writing to the rotated file.
+      mode: "0751"
     - path: /mnt/frontpanel-pool/frontpanel-dataset/Backup/seafile
       owner: "100000"
       group: "100000"
